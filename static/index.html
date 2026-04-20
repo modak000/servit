@@ -242,6 +242,58 @@
     <div id="services-body"><div class="file-empty">불러오는 중...</div></div>
   </div>
 
+  <!-- SSH Servers panel -->
+  <div id="servers-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Servers</span>
+        <span class="panel-subtitle">SSH 서버 관리</span>
+      </div>
+      <button class="icon-btn" onclick="addServer()" aria-label="Add server">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="icon-btn" onclick="refreshServers()" aria-label="Refresh">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="icon-btn" onclick="closeServers()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="servers-body"><div class="file-empty">불러오는 중...</div></div>
+  </div>
+
+  <!-- Server add/edit form overlay -->
+  <div id="server-form" class="hidden">
+    <div class="overlay-backdrop" onclick="closeServerForm()"></div>
+    <div class="popup-card server-form-card">
+      <div class="pp-title" id="server-form-title">서버 추가</div>
+      <div class="server-form-fields">
+        <input type="hidden" id="sf-original-name" value="">
+        <label class="sf-label">이름 *</label>
+        <input type="text" id="sf-name" class="sf-input" placeholder="GPU Server" autocomplete="off">
+        <label class="sf-label">호스트 *</label>
+        <input type="text" id="sf-host" class="sf-input" placeholder="192.168.1.100" autocomplete="off">
+        <label class="sf-label">포트</label>
+        <input type="number" id="sf-port" class="sf-input" value="22" min="1" max="65535">
+        <label class="sf-label">사용자 *</label>
+        <input type="text" id="sf-username" class="sf-input" placeholder="mk04" autocomplete="off">
+        <label class="sf-label">인증 방식</label>
+        <select id="sf-auth" class="sf-input">
+          <option value="key">SSH Key</option>
+          <option value="password">Password</option>
+        </select>
+        <label class="sf-label">키 경로 (선택)</label>
+        <input type="text" id="sf-keypath" class="sf-input" placeholder="~/.ssh/id_ed25519" autocomplete="off">
+        <label class="sf-label">Jump Host (선택)</label>
+        <input type="text" id="sf-jumphost" class="sf-input" placeholder="user@proxy.example.com" autocomplete="off">
+      </div>
+      <div class="server-form-actions">
+        <button class="sf-save-btn" onclick="saveServerForm()">저장</button>
+        <button class="sf-cancel-btn" onclick="closeServerForm()">취소</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Pane picker overlay -->
   <div id="pane-picker" class="hidden">
     <div class="overlay-backdrop" onclick="closePanePicker()"></div>
@@ -312,6 +364,10 @@
         <button onclick="openBookmarks(); closeMoreMenu()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
           즐겨찾기
+        </button>
+        <button onclick="openServers(); closeMoreMenu()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
+          SSH 서버
         </button>
       </div>
       <div id="topbar-title">

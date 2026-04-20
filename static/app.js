@@ -1940,6 +1940,175 @@
     }
   }
 
+  // ── SSH Servers Panel ──────────────────────────
+  window.openServers = function () {
+    $("#servers-panel").classList.remove("hidden");
+    refreshServers();
+  };
+  window.closeServers = function () {
+    $("#servers-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+  window.refreshServers = async function () {
+    var body = $("#servers-body");
+    body.innerHTML = '<div class="file-loading">불러오는 중...</div>';
+    try {
+      var res = await fetch("/api/ssh-servers?action=list");
+      var data = await res.json();
+      if (data.error) {
+        body.innerHTML = '<div class="file-empty">' + escHtml(data.error) + '</div>';
+        return;
+      }
+      if (!data.servers || data.servers.length === 0) {
+        body.innerHTML = '<div class="file-empty">저장된 서버 없음<br><br>상단 + 버튼으로 서버를 추가하세요</div>';
+        return;
+      }
+      var html = "";
+      data.servers.forEach(function (s) {
+        html += '<div class="server-card">';
+        html += '<div class="server-card-top">';
+        html += '<div class="server-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg></div>';
+        html += '<span class="server-name">' + escHtml(s.name) + '</span>';
+        html += '</div>';
+        html += '<div class="server-detail">' + escHtml(s.username) + '@' + escHtml(s.host) + ':' + s.port + '</div>';
+        if (s.jump_host) {
+          html += '<span class="server-jump-badge">via ' + escHtml(s.jump_host) + '</span>';
+        }
+        html += '<div class="server-actions">';
+        html += '<button class="server-action-btn connect" onclick="connectServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">Connect</button>';
+        html += '<button class="server-action-btn edit" onclick="editServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">Edit</button>';
+        html += '<button class="server-action-btn delete" onclick="deleteServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">Del</button>';
+        html += '</div>';
+        html += '</div>';
+      });
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  };
+
+  window.connectServer = async function (name) {
+    try {
+      var res = await fetch("/api/ssh-servers?action=connect&name=" + encodeURIComponent(name));
+      var data = await res.json();
+      if (data.error) {
+        showToast(data.error, true);
+        return;
+      }
+      // Close servers panel and send SSH command to terminal
+      closeServers();
+      var cmd = data.command + "\n";
+      sendWs(cmd);
+      showToast(name + " 접속 중...");
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+
+  window.addServer = function () {
+    // Clear form
+    $("#sf-original-name").value = "";
+    $("#sf-name").value = "";
+    $("#sf-host").value = "";
+    $("#sf-port").value = "22";
+    $("#sf-username").value = "";
+    $("#sf-auth").value = "key";
+    $("#sf-keypath").value = "";
+    $("#sf-jumphost").value = "";
+    $("#server-form-title").textContent = "서버 추가";
+    $("#server-form").classList.remove("hidden");
+  };
+
+  window.editServer = async function (name) {
+    try {
+      var res = await fetch("/api/ssh-servers?action=list");
+      var data = await res.json();
+      var server = (data.servers || []).find(function (s) { return s.name === name; });
+      if (!server) {
+        showToast("서버를 찾을 수 없습니다", true);
+        return;
+      }
+      $("#sf-original-name").value = server.name;
+      $("#sf-name").value = server.name;
+      $("#sf-host").value = server.host;
+      $("#sf-port").value = server.port || 22;
+      $("#sf-username").value = server.username;
+      $("#sf-auth").value = server.auth || "key";
+      $("#sf-keypath").value = server.key_path || "";
+      $("#sf-jumphost").value = server.jump_host || "";
+      $("#server-form-title").textContent = "서버 편집";
+      $("#server-form").classList.remove("hidden");
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+
+  window.closeServerForm = function () {
+    $("#server-form").classList.add("hidden");
+  };
+
+  window.saveServerForm = async function () {
+    var name = ($("#sf-name").value || "").trim();
+    var host = ($("#sf-host").value || "").trim();
+    var port = $("#sf-port").value || "22";
+    var username = ($("#sf-username").value || "").trim();
+    var auth = $("#sf-auth").value || "key";
+    var keyPath = ($("#sf-keypath").value || "").trim();
+    var jumpHost = ($("#sf-jumphost").value || "").trim();
+    var originalName = ($("#sf-original-name").value || "").trim();
+
+    if (!name || !host || !username) {
+      showToast("이름, 호스트, 사용자는 필수입니다", true);
+      return;
+    }
+
+    // If name changed during edit, delete the old one first
+    if (originalName && originalName !== name) {
+      try {
+        await fetch("/api/ssh-servers?action=delete&name=" + encodeURIComponent(originalName));
+      } catch (e) { /* ignore */ }
+    }
+
+    var url = "/api/ssh-servers?action=save" +
+      "&name=" + encodeURIComponent(name) +
+      "&host=" + encodeURIComponent(host) +
+      "&port=" + encodeURIComponent(port) +
+      "&username=" + encodeURIComponent(username) +
+      "&auth=" + encodeURIComponent(auth) +
+      "&key_path=" + encodeURIComponent(keyPath) +
+      "&jump_host=" + encodeURIComponent(jumpHost);
+
+    try {
+      var res = await fetch(url);
+      var data = await res.json();
+      if (data.ok) {
+        showToast("저장 완료");
+        closeServerForm();
+        refreshServers();
+      } else {
+        showToast(data.error || "저장 실패", true);
+      }
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+
+  window.deleteServer = async function (name) {
+    if (!confirm("'" + name + "' 서버를 삭제하시겠습니까?")) return;
+    try {
+      var res = await fetch("/api/ssh-servers?action=delete&name=" + encodeURIComponent(name));
+      var data = await res.json();
+      if (data.ok) {
+        showToast("삭제 완료");
+        refreshServers();
+      } else {
+        showToast(data.error || "삭제 실패", true);
+      }
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+
   // ── Override renderMonitor to use tabs ─────────
   // Replace the original renderMonitor with the tabbed version
   renderMonitor = function (s) {

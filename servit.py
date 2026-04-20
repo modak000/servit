@@ -1283,6 +1283,111 @@ def handle_api(path, request, session_info):
         except Exception as e:
             return make_json({"error": str(e)})
 
+    elif path.startswith("/api/ssh-servers"):
+        servers_file = os.path.join(session_info["home"], ".servit", "servers.json")
+        os.makedirs(os.path.dirname(servers_file), exist_ok=True)
+        action = params.get("action", ["list"])[0]
+
+        def load_servers():
+            try:
+                if os.path.isfile(servers_file):
+                    with open(servers_file, "r") as f:
+                        return json.load(f)
+                return []
+            except Exception:
+                return []
+
+        def save_servers(servers):
+            with open(servers_file, "w") as f:
+                json.dump(servers, f, indent=2)
+
+        if action == "list":
+            return make_json({"servers": load_servers()})
+
+        elif action == "save":
+            name = params.get("name", [""])[0]
+            host = params.get("host", [""])[0]
+            port = params.get("port", ["22"])[0]
+            username = params.get("username", [""])[0]
+            auth = params.get("auth", ["key"])[0]
+            key_path = params.get("key_path", [""])[0]
+            jump_host = params.get("jump_host", [""])[0]
+
+            if not name or not host or not username:
+                return make_json({"ok": False, "error": "Name, host, and username are required"})
+            if not port.isdigit() or int(port) < 1 or int(port) > 65535:
+                return make_json({"ok": False, "error": "Invalid port number"})
+            # Validate no shell metacharacters in critical fields
+            for field_name, field_val in [("host", host), ("username", username), ("jump_host", jump_host)]:
+                if field_val and re.search(r'[;&|`$(){}\\"\'\n\r]', field_val):
+                    return make_json({"ok": False, "error": f"Invalid characters in {field_name}"})
+
+            servers = load_servers()
+            if len(servers) >= 50:
+                return make_json({"ok": False, "error": "Maximum 50 servers"})
+
+            new_server = {
+                "name": name.strip(),
+                "host": host.strip(),
+                "port": int(port),
+                "username": username.strip(),
+                "auth": auth if auth in ("key", "password") else "key",
+                "key_path": key_path.strip(),
+                "jump_host": jump_host.strip(),
+            }
+
+            # Update existing or append
+            found = False
+            for i, s in enumerate(servers):
+                if s.get("name") == name.strip():
+                    servers[i] = new_server
+                    found = True
+                    break
+            if not found:
+                servers.append(new_server)
+
+            try:
+                save_servers(servers)
+                return make_json({"ok": True})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+
+        elif action == "delete":
+            name = params.get("name", [""])[0]
+            if not name:
+                return make_json({"ok": False, "error": "No name specified"})
+            servers = load_servers()
+            servers = [s for s in servers if s.get("name") != name]
+            try:
+                save_servers(servers)
+                return make_json({"ok": True})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+
+        elif action == "connect":
+            name = params.get("name", [""])[0]
+            if not name:
+                return make_json({"error": "No name specified"})
+            servers = load_servers()
+            server = next((s for s in servers if s.get("name") == name), None)
+            if not server:
+                return make_json({"error": "Server not found"})
+
+            # Build SSH command
+            parts = ["ssh"]
+            if server.get("jump_host"):
+                parts.extend(["-J", server["jump_host"]])
+            parts.extend(["-o", "StrictHostKeyChecking=accept-new"])
+            if server.get("key_path"):
+                parts.extend(["-i", server["key_path"]])
+            if server.get("port") and server["port"] != 22:
+                parts.extend(["-p", str(server["port"])])
+            parts.append(f"{server['username']}@{server['host']}")
+
+            return make_json({"command": " ".join(parts), "server": server})
+
+        return make_json({"error": "Unknown action"})
+
     elif path.startswith("/api/bookmarks"):
         bm_file = os.path.join(session_info["home"], ".servit", "bookmarks.json")
         os.makedirs(os.path.dirname(bm_file), exist_ok=True)
