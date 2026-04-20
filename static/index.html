@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Servit</title>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d1117">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+  <!-- Sidebar overlay backdrop -->
+  <div id="sidebar-backdrop" onclick="closeSidebar()"></div>
+
+  <!-- Sidebar (slides in from left) -->
+  <nav id="sidebar">
+    <div class="sidebar-header">
+      <span id="current-path">~</span>
+      <button class="icon-btn" onclick="closeSidebar()" aria-label="Close sidebar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sidebar-actions">
+      <button class="sidebar-action-btn" onclick="goParent()" title="상위 폴더">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        상위
+      </button>
+      <button class="sidebar-action-btn" onclick="goHome()" title="홈 디렉토리">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        홈
+      </button>
+      <button class="sidebar-action-btn" onclick="refreshTree()" title="새로고침">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      </button>
+      <label class="toggle-hidden">
+        <input type="checkbox" id="show-hidden" onchange="refreshTree()">
+        <span>.*</span>
+      </label>
+    </div>
+    <div id="file-list"></div>
+  </nav>
+
+  <!-- Monitor overlay -->
+  <div id="monitor" class="hidden">
+    <div id="monitor-header">
+      <div id="monitor-title-row">
+        <span id="monitor-title">Server Status</span>
+        <span id="monitor-subtitle">모니터링</span>
+      </div>
+      <button class="icon-btn" onclick="closeMonitor()" aria-label="Close monitor">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="monitor-body">
+      <div class="monitor-loading">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- Docker overlay -->
+  <div id="docker-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Docker</span>
+        <span class="panel-subtitle">도커 컨테이너</span>
+      </div>
+      <button class="icon-btn" onclick="refreshDocker()" aria-label="Refresh">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="icon-btn" onclick="closeDocker()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="docker-body">
+      <div class="monitor-loading">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- Logs overlay -->
+  <div id="logs-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Logs</span>
+        <span class="panel-subtitle">로그 뷰어</span>
+      </div>
+      <div id="logs-search-wrap">
+        <input type="text" id="logs-search" placeholder="검색..." autocomplete="off">
+      </div>
+      <button class="icon-btn" id="logs-tail-btn" onclick="toggleLogTail()" aria-label="Tail mode">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="icon-btn" onclick="closeLogs()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="logs-container">
+      <div id="logs-file-list"></div>
+      <div id="logs-content">
+        <div class="file-empty">로그 파일을 선택하세요</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes overlay -->
+  <div id="notes-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Notes</span>
+        <span class="panel-subtitle">메모</span>
+      </div>
+      <button class="icon-btn" onclick="createNote()" aria-label="New note">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="icon-btn" onclick="closeNotes()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="notes-container">
+      <div id="notes-list"></div>
+      <div id="notes-editor">
+        <div id="notes-editor-header" class="hidden">
+          <input type="text" id="note-name-input" placeholder="메모 제목">
+          <button class="icon-btn note-delete-btn" onclick="deleteCurrentNote()" aria-label="Delete">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+          </button>
+        </div>
+        <textarea id="note-textarea" class="hidden" placeholder="메모 내용을 입력하세요..."></textarea>
+        <div id="notes-empty" class="file-empty">메모를 선택하거나 새로 만드세요</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Viewer overlay -->
+  <div id="viewer" class="hidden">
+    <div id="viewer-header">
+      <div id="viewer-title-row">
+        <span id="viewer-title">file.py</span>
+        <span id="viewer-info">python</span>
+      </div>
+      <div id="viewer-actions">
+        <button class="viewer-action-btn" id="btn-edit" onclick="startEdit()" style="display:none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          편집
+        </button>
+        <button class="viewer-action-btn save-btn" id="btn-save" onclick="saveEdit()" style="display:none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          저장
+        </button>
+        <button class="viewer-action-btn cancel-btn" id="btn-cancel" onclick="cancelEdit()" style="display:none">취소</button>
+      </div>
+      <button class="icon-btn" onclick="closeViewer()" aria-label="Close viewer">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="viewer-body">
+      <pre><code id="viewer-code"></code></pre>
+    </div>
+  </div>
+
+  <!-- Pane picker overlay -->
+  <div id="pane-picker" class="hidden">
+    <div class="overlay-backdrop" onclick="closePanePicker()"></div>
+    <div class="pane-picker-card">
+      <div class="pp-title">Pane 선택</div>
+      <div class="pp-grid">
+        <button onclick="pickPane(0)">0</button>
+        <button onclick="pickPane(1)">1</button>
+        <button onclick="pickPane(2)">2</button>
+        <button onclick="pickPane(3)">3</button>
+        <button onclick="pickPane(4)">4</button>
+        <button onclick="pickPane(5)">5</button>
+        <button onclick="pickPane(6)">6</button>
+        <button onclick="pickPane(7)">7</button>
+        <button onclick="pickPane(8)">8</button>
+      </div>
+      <button class="pp-unzoom" onclick="unzoomPane()">원래대로</button>
+      <button class="pp-close" onclick="closePanePicker()">닫기</button>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container"></div>
+
+  <!-- Main layout -->
+  <div id="main">
+    <!-- Top bar -->
+    <header id="topbar">
+      <button class="icon-btn" id="btn-menu" onclick="toggleSidebar()" aria-label="Menu">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-monitor" onclick="openMonitor()" aria-label="Monitor">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-docker" onclick="openDocker()" aria-label="Docker">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M6 7V5a2 2 0 012-2h8a2 2 0 012 2v2"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="8" y1="11" x2="8" y2="17"/><line x1="16" y1="11" x2="16" y2="17"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-logs" onclick="openLogs()" aria-label="Logs">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-notes" onclick="openNotes()" aria-label="Notes">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
+      <div id="topbar-title">
+        <span id="status-dot"></span>
+        <span id="topbar-label">Terminal</span>
+      </div>
+      <button class="icon-btn" onclick="logout()" aria-label="Logout">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </header>
+
+    <!-- Terminal -->
+    <div id="terminal-wrap">
+      <div id="terminal-container"></div>
+    </div>
+
+    <!-- Korean input bar -->
+    <div id="input-bar">
+      <div id="input-composing" class="hidden">한글 입력 중...</div>
+      <div id="input-row">
+        <input type="text" id="korean-input" placeholder="입력 (한글 OK)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">
+        <button id="input-dismiss" onclick="dismissKeyboard()" aria-label="키보드 닫기">▼</button>
+        <button id="input-send" onclick="sendInputBar()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick bar -->
+    <div id="quickbar">
+      <div class="qrow" id="qrow-main">
+        <button onclick="qSilent('\x1b')" class="q-special">ESC</button>
+        <button onclick="qSilent('\t')" class="q-special">TAB</button>
+        <button onclick="qSilent('\x03')" class="q-danger">Ctrl-C</button>
+        <button onclick="doPaste()" class="q-action">붙여넣기</button>
+        <button onclick="qType('Y\n')" class="q-yes">Y</button>
+        <button onclick="qType('N\n')" class="q-no">N</button>
+        <button onclick="openPanePicker()" class="q-action">Pane</button>
+        <button onclick="toggleQuickbar()" id="qbar-toggle" class="q-toggle">더보기</button>
+      </div>
+      <div id="qbar-extra" class="hidden">
+        <div class="qrow">
+          <span class="qlabel tmux">tmux</span>
+          <button onclick="qType('tmux a\n')" class="q-tmux">접속</button>
+          <button onclick="qSilent('\x02c')" class="q-tmux">새창</button>
+          <button onclick="qSilent('\x02d')" class="q-tmux">나가기</button>
+          <button onclick="qSilent('\x02z')" class="q-tmux">확대</button>
+          <button onclick="qSilent('\x02o')" class="q-tmux">이동</button>
+          <button onclick="tmuxMouseOn()" class="q-tmux">터치</button>
+        </div>
+        <div class="qrow">
+          <span class="qlabel claude">claude</span>
+          <button onclick="qType('claude\n')" class="q-claude">claude</button>
+          <button onclick="qType('/commit\n')" class="q-claude">/commit</button>
+          <button onclick="qType('/help\n')" class="q-claude">/help</button>
+          <button onclick="qType('/clear\n')" class="q-claude">/clear</button>
+        </div>
+        <div class="qrow">
+          <span class="qlabel shell">shell</span>
+          <button onclick="qType('ls -la\n')" class="q-shell">ls -la</button>
+          <button onclick="qType('cd ..\n')" class="q-shell">cd ..</button>
+          <button onclick="qType('clear\n')" class="q-shell">clear</button>
+          <button onclick="qType('git status\n')" class="q-shell">git st</button>
+        </div>
+        <div class="qrow">
+          <span class="qlabel sys">sys</span>
+          <button onclick="qType('nvidia-smi\n')" class="q-sys">gpu</button>
+          <button onclick="qType('free -h\n')" class="q-sys">free</button>
+          <button onclick="qType('df -h\n')" class="q-sys">disk</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/kotlin.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/gradle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/yaml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/properties.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
