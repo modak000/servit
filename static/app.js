@@ -721,7 +721,11 @@
     input.addEventListener("focus", () => {
       inputFocused = true;
       if (quickbar) quickbar.classList.add("qbar-hidden");
-      setTimeout(doFit, 100);
+      // iOS: scroll input into view above keyboard
+      setTimeout(() => {
+        input.scrollIntoView({ block: "end", behavior: "smooth" });
+        doFit();
+      }, 300);
     });
 
     input.addEventListener("blur", () => {
@@ -733,6 +737,15 @@
     // Handle iOS visual viewport resize (keyboard appear/disappear)
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", () => {
+        // Adjust input bar position based on visible viewport
+        const vv = window.visualViewport;
+        const bar = $("#input-bar");
+        if (bar && inputFocused) {
+          const offset = window.innerHeight - vv.height - vv.offsetTop;
+          bar.style.transform = offset > 0 ? `translateY(-${offset}px)` : "";
+        } else if (bar) {
+          bar.style.transform = "";
+        }
         doFit();
       });
     }
