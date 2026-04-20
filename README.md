@@ -5,9 +5,13 @@
 [![Single File](https://img.shields.io/badge/Size-150KB-green.svg)](#architecture)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/modak000/servit/pulls)
 
-> **서버를 폰으로 관리하세요.** 터미널 + 파일 편집 + 모니터링 + Docker + 로그, 파이썬 파일 하나.
+> **GPU 서버에서 Claude Code 돌리는데, 폰에서 확인하고 싶지 않으세요?**
 >
-> **Manage your server from your phone.** Terminal, file editor, monitoring, Docker, logs — one Python file.
+> 학습 상태 확인, Claude Code 승인/거부, 파일 수정, 프로세스 kill — 폰 브라우저 하나로. 파이썬 파일 하나, 150KB.
+>
+> **Running Claude Code on a GPU server? Manage it from your phone.**
+>
+> Check training status, approve/reject Claude Code, edit files, kill processes — all from your phone browser. One Python file, 150KB.
 
 <pre>
 +-----------------------------------------------+
@@ -32,20 +36,35 @@
 
 ## Why Servit?
 
-**Problem**: Managing a server from your phone means juggling SSH apps, file managers, and monitoring dashboards separately.
+**Problem**: You're running Claude Code or training a model on a GPU server. You step away from your desk. Now what?
 
-**Solution**: Servit puts everything in one browser tab. 150KB, one Python dependency, 10-second install.
+- Claude Code asks for approval → you can't respond
+- GPU training crashes → you don't know until you're back
+- Need to edit one line in a config → have to open laptop
+- Disk fills up at 2 AM → no way to check from bed
 
-|                   | SSH App  | Cockpit  | code-server | **Servit**     |
-|-------------------|----------|----------|-------------|----------------|
-| Install size      | App req. | 300MB+   | 500MB+      | **150KB**      |
-| Korean input      | No       | No       | Partial     | **Yes**        |
-| File editor       | No       | Limited  | Full IDE    | **Syntax HL**  |
-| Excel / HWP       | No       | No       | No          | **Yes**        |
-| Docker mgmt       | No       | Yes      | No          | **Yes**        |
-| GPU monitoring    | No       | Plugin   | No          | **Built-in**   |
-| PWA (Add to Home) | N/A      | No       | No          | **Yes**        |
-| Dependencies      | N/A      | Many     | Node.js     | **1 (pip)**    |
+**Solution**: Servit gives you your entire server in your phone browser. 150KB, one Python dependency, 10 seconds to install.
+
+### Who is this for?
+
+- **AI/ML engineers** — monitor GPU training, check VRAM, kill stuck processes from anywhere
+- **Claude Code users** — approve/reject, run commands, check output on your phone
+- **DevOps / Sysadmins** — Docker, logs, monitoring without opening a laptop
+- **Anyone with a Linux server** — file editing, terminal, system status from any device
+
+### vs Alternatives
+
+|                      | SSH App  | Cockpit  | code-server | **Servit**     |
+|----------------------|----------|----------|-------------|----------------|
+| Install size         | App req. | 300MB+   | 500MB+      | **150KB**      |
+| Claude Code buttons  | No       | No       | No          | **Y/N/commit** |
+| GPU monitoring       | No       | Plugin   | No          | **Built-in**   |
+| File editor          | No       | Limited  | Full IDE    | **Syntax HL**  |
+| Docker mgmt          | No       | Yes      | No          | **Yes**        |
+| Korean IME           | No       | No       | Partial     | **Yes**        |
+| SSH proxy jump       | Paid     | No       | No          | **Yes**        |
+| PWA (Add to Home)    | N/A      | No       | No          | **Yes**        |
+| Dependencies         | N/A      | Many     | Node.js     | **1 (pip)**    |
 
 ---
 
