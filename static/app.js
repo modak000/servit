@@ -653,8 +653,10 @@
     term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
     term.open($("#terminal-container"));
 
-    // For ASCII / English direct typing in xterm (still works)
+    // For ASCII / English direct typing in xterm
+    // Block when korean input bar is focused (prevents jamo leaking)
     term.onData((data) => {
+      if (inputFocused) return;
       sendWs(data);
     });
 
