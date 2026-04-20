@@ -272,6 +272,87 @@ servit status
 servit url
 ```
 
+### Remote Access (Phone / External)
+
+Servit runs on your server. To access from your phone, you need to expose it. Here are your options:
+
+| Method | Fixed URL | Free | Setup |
+|--------|-----------|------|-------|
+| **Same WiFi** | `http://IP:8765` | Yes | None |
+| **Tailscale** | `http://100.x.x.x:8765` | Yes (100 devices) | Install on server + phone |
+| **ngrok** | `xxx.ngrok-free.app` | Yes (1 free domain) | Sign up + install |
+| **Cloudflare Tunnel** | Random URL (changes) | Yes | Install cloudflared |
+| **Cloudflare Named** | `servit.yourdomain.com` | Domain needed | Cloudflare account + domain |
+
+#### Option 1: Same WiFi (Easiest)
+
+If your phone and server are on the same network:
+
+```bash
+servit
+# Open http://YOUR_SERVER_IP:8765 on phone
+```
+
+Find your server IP: `hostname -I | awk '{print $1}'`
+
+#### Option 2: Tailscale (Recommended for fixed URL, free)
+
+[Tailscale](https://tailscale.com) creates a private VPN between your devices. Free for up to 100 devices.
+
+```bash
+# On server
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# On phone: install Tailscale app, sign in with same account
+
+# Then access Servit via Tailscale IP
+servit
+# Open http://100.x.x.x:8765 on phone (IP is fixed)
+```
+
+Tailscale IP never changes. No domain needed. Encrypted.
+
+#### Option 3: ngrok (Free fixed domain)
+
+[ngrok](https://ngrok.com) gives you **1 free fixed domain** on sign-up.
+
+```bash
+# Install ngrok and sign up at https://ngrok.com
+ngrok config add-authtoken YOUR_TOKEN
+
+# Run Servit + ngrok
+servit &
+ngrok http 8765 --domain your-name.ngrok-free.app
+
+# Access: https://your-name.ngrok-free.app (fixed, HTTPS)
+```
+
+#### Option 4: Cloudflare Quick Tunnel (Free, URL changes)
+
+```bash
+servit --tunnel
+servit url        # Show the generated URL
+```
+
+URL changes on restart. Good for quick/temporary access.
+
+#### Option 5: Cloudflare Named Tunnel (Fixed URL, domain needed)
+
+Requires a domain ($10-15/year) and free Cloudflare account.
+
+```bash
+# One-time setup
+cloudflared tunnel login
+cloudflared tunnel create servit
+cloudflared tunnel route dns servit servit.yourdomain.com
+
+# Run
+cloudflared tunnel --url http://localhost:8765 run servit
+
+# Access: https://servit.yourdomain.com (fixed, HTTPS)
+```
+
 ### Auth Modes
 
 | Mode            | Option       | Description                    |
