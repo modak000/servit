@@ -35,6 +35,7 @@
 html {
   height: 100%;
   -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
 }
 
 body {
@@ -46,6 +47,7 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #app {
@@ -78,15 +80,15 @@ body {
 
 /* ── Top bar ────────────────────────────────────── */
 #topbar {
-  height: var(--topbar-h);
-  min-height: var(--topbar-h);
+  height: calc(var(--topbar-h) + var(--safe-top));
+  min-height: calc(var(--topbar-h) + var(--safe-top));
   background: var(--bg1);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   padding: 0 4px;
   padding-top: var(--safe-top);
-  gap: 4px;
+  gap: 2px;
   z-index: 10;
 }
 
@@ -112,11 +114,20 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--orange);
+  background: var(--red);
   flex-shrink: 0;
   transition: background 0.3s;
+  box-shadow: 0 0 0 0 transparent;
 }
-#status-dot.ok { background: var(--green); }
+#status-dot.ok {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
+  animation: dotPulse 2s ease-in-out infinite;
+}
+@keyframes dotPulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(63, 185, 80, 0.3); }
+  50% { box-shadow: 0 0 8px rgba(63, 185, 80, 0.6); }
+}
 
 /* ── Sidebar ────────────────────────────────────── */
 #sidebar-backdrop {
@@ -140,14 +151,14 @@ body {
   top: 0;
   left: 0;
   bottom: 0;
-  width: 85vw;
-  max-width: 360px;
+  width: 82vw;
+  max-width: 340px;
   background: var(--bg1);
   z-index: 100;
   display: flex;
   flex-direction: column;
   transform: translateX(-100%);
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
   padding-top: var(--safe-top);
 }
@@ -233,7 +244,7 @@ body {
   min-height: 44px;
 }
 .fitem:active { background: var(--bg2); }
-.fitem.tap-flash { background: var(--accent-dim); transition: background 0.05s; }
+.fitem.tap-flash { background: rgba(31, 111, 235, 0.15); transition: background 0.05s; }
 .fi-icon {
   font-size: 16px;
   min-width: 24px;
@@ -291,6 +302,8 @@ body {
   position: sticky;
   bottom: 0;
   z-index: 50;
+  transition: transform 0.15s ease-out;
+  will-change: transform;
 }
 
 #input-composing {
@@ -444,6 +457,7 @@ body {
   color: var(--text2) !important;
   font-size: 12px !important;
   margin-left: auto;
+  font-family: -apple-system, sans-serif !important;
 }
 .q-toggle.open { color: var(--accent) !important; }
 
@@ -563,8 +577,8 @@ body {
   animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes slideUp {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
+  from { transform: translateY(100%); opacity: 0.8; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 #viewer-header {
@@ -763,11 +777,15 @@ body {
   font-size: 13px;
   color: var(--text);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  animation: toastIn 0.3s ease-out, toastOut 0.3s ease-in 2.7s forwards;
+  animation: toastIn 0.25s ease-out, toastOut 0.25s ease-in 2.7s forwards;
   pointer-events: auto;
   max-width: 90vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .toast.error { border-color: var(--red); color: var(--red); }
+.toast.success { border-color: var(--green); color: var(--green); }
 @keyframes toastIn {
   from { transform: translateY(-20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -991,12 +1009,12 @@ body {
   background: var(--bg2);
   border: 1px solid var(--bg3);
   color: var(--text2);
-  padding: 6px 12px;
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
-  min-height: 36px;
+  min-height: 38px;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s;
 }
@@ -1130,8 +1148,9 @@ body {
   color: var(--text2);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  min-height: 36px;
+  min-height: 40px;
   -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
 }
 .docker-action-btn:active { background: var(--bg3); color: var(--text); }
 .docker-action-btn.start { color: var(--green); }
@@ -1173,6 +1192,7 @@ body {
   border-bottom: 2px solid transparent;
   min-height: 44px;
   -webkit-tap-highlight-color: transparent;
+  transition: color 0.2s, border-color 0.2s;
 }
 .monitor-tab.active {
   color: var(--accent);
@@ -1388,11 +1408,21 @@ body {
   justify-content: center;
 }
 
+.note-save-indicator {
+  font-size: 11px;
+  color: var(--text3);
+  padding: 0 8px;
+  flex-shrink: 0;
+  transition: color 0.3s;
+}
+.note-save-indicator.saving { color: var(--orange); }
+.note-save-indicator.saved { color: var(--green); }
+
 /* ── More Menu (dropdown) ────────────────────────── */
 #more-menu {
   position: absolute;
-  top: var(--topbar-h);
-  right: 48px;
+  top: calc(var(--topbar-h) + var(--safe-top));
+  right: 8px;
   background: var(--bg1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1893,7 +1923,7 @@ body {
   color: var(--text2);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  min-height: 40px;
+  min-height: 44px;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s;
 }
@@ -1999,5 +2029,29 @@ select.sf-input {
   #quickbar button {
     min-height: 32px;
     padding: 6px 10px;
+  }
+
+  .docker-action-btn,
+  .server-action-btn {
+    min-height: 36px;
+  }
+
+  #more-menu button {
+    min-height: 40px;
+    padding: 10px 14px;
+  }
+}
+
+/* ── Small screen (iPhone SE) ──────────────────── */
+@media (max-width: 375px) {
+  #quickbar button {
+    padding: 6px 10px;
+    font-size: 12px;
+    min-height: 40px;
+  }
+
+  .qlabel {
+    font-size: 9px;
+    padding: 0 4px;
   }
 }

@@ -53,7 +53,11 @@
     el.className = "toast" + (isError ? " error" : "");
     el.textContent = msg;
     container.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
+    el.addEventListener("animationend", (e) => {
+      if (e.animationName === "toastOut") el.remove();
+    });
+    // Fallback removal
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 3500);
   }
 
   // ── Sidebar ────────────────────────────────────
@@ -901,6 +905,7 @@
 
     ws.onopen = () => {
       $("#status-dot").classList.add("ok");
+      $("#topbar-label").textContent = "Terminal";
       wsReconnectDelay = 1000; // reset backoff
       setTimeout(sendResize, 200);
     };
@@ -918,6 +923,7 @@
 
     ws.onclose = () => {
       $("#status-dot").classList.remove("ok");
+      $("#topbar-label").textContent = "Disconnected";
       ws = null;
       if (!intentionalClose) {
         if (term) {
@@ -1480,6 +1486,8 @@
 
   function scheduleNoteSave() {
     if (noteAutoSaveTimer) clearTimeout(noteAutoSaveTimer);
+    var indicator = document.getElementById("note-save-status");
+    if (indicator) { indicator.textContent = ""; indicator.className = "note-save-indicator"; }
     noteAutoSaveTimer = setTimeout(saveCurrentNote, 3000);
   }
 
@@ -1495,12 +1503,15 @@
     if (!currentNoteName) return;
     var ta = document.getElementById("note-textarea");
     if (!ta) return;
+    var indicator = document.getElementById("note-save-status");
     var content = ta.value;
     var b64 = btoa(unescape(encodeURIComponent(content)));
+    if (indicator) { indicator.textContent = "저장 중..."; indicator.className = "note-save-indicator saving"; }
     try {
       await fetch("/api/notes?action=save&name=" + encodeURIComponent(currentNoteName) + "&b64=" + encodeURIComponent(b64));
+      if (indicator) { indicator.textContent = "저장됨"; indicator.className = "note-save-indicator saved"; }
     } catch (e) {
-      /* silent */
+      if (indicator) { indicator.textContent = "저장 실패"; indicator.className = "note-save-indicator"; }
     }
   }
 
@@ -1621,7 +1632,7 @@
   window.refreshDisk = function () {
     fetchDisk(diskCurrentPath);
   };
-  async function fetchDisk(path) {
+  window.fetchDisk = async function fetchDisk(path) {
     var body = $("#disk-body");
     body.innerHTML = '<div class="file-loading">분석 중... (시간이 걸릴 수 있습니다)</div>';
     try {
@@ -1975,9 +1986,9 @@
           html += '<span class="server-jump-badge">via ' + escHtml(s.jump_host) + '</span>';
         }
         html += '<div class="server-actions">';
-        html += '<button class="server-action-btn connect" onclick="connectServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">Connect</button>';
-        html += '<button class="server-action-btn edit" onclick="editServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">Edit</button>';
-        html += '<button class="server-action-btn delete" onclick="deleteServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">Del</button>';
+        html += '<button class="server-action-btn connect" onclick="connectServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">접속</button>';
+        html += '<button class="server-action-btn edit" onclick="editServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">편집</button>';
+        html += '<button class="server-action-btn delete" onclick="deleteServer(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">삭제</button>';
         html += '</div>';
         html += '</div>';
       });
