@@ -312,12 +312,18 @@ servit url
 
 | 항목 | 설명 |
 |---|---|
-| 인증 | Linux 시스템 비밀번호 (su 명령 검증) |
+| 인증 전송 | Authorization 헤더 (URL에 비밀번호 노출 없음) |
+| 인증 방식 | Linux 시스템 비밀번호 (su 명령 검증) |
 | Brute force 방어 | 5분 내 10회 실패 시 10분 잠금 |
+| API Rate Limit | IP당 100회/분 제한, 초과 시 429 |
 | 통신 암호화 | HTTPS (Cloudflare Tunnel 사용 시) |
 | 쿠키 | HttpOnly, SameSite=Strict |
 | 세션 | 토큰 기반, 메모리 저장 (재시작 시 만료) |
-| 파일 접근 | 인증된 사용자의 파일 시스템 권한 적용 |
+| 파일 접근 제한 | 홈 디렉토리 밖 접근 차단 |
+| 프로세스 Kill | 본인 소유 프로세스만 가능 |
+| 파일 저장 | 덮어쓰기 전 .servit-bak 자동 백업 |
+| Docker ID 검증 | 정규식 기반 컨테이너 ID 검증 |
+| 보안 헤더 | X-Frame-Options: DENY, CSP, X-Content-Type-Options |
 
 > **권장**: 외부 접속 시 반드시 `--tunnel` 옵션으로 HTTPS를 사용하세요. HTTP 단독 사용은 로컬 네트워크에서만 권장합니다.
 
@@ -373,7 +379,7 @@ Data stays on your server.
 
 | Endpoint | 설명 |
 |---|---|
-| `POST /api/login` | 로그인 (query params: username, password) |
+| `GET /api/login` | 로그인 (Authorization: Basic 헤더) |
 | `GET /api/tree` | 파일 트리 (query: path) |
 | `GET /api/file` | 파일 내용 조회 (query: path) |
 | `GET /api/save` | 파일 저장 (query: path, b64) |
