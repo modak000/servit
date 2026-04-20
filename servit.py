@@ -1048,6 +1048,290 @@ def handle_api(path, request, session_info):
             "home": session_info["home"],
         })
 
+    elif path.startswith("/api/cron"):
+        action = params.get("action", ["list"])[0]
+        if action == "list":
+            try:
+                result = subprocess.run(
+                    ["crontab", "-l"],
+                    capture_output=True, text=True, timeout=5
+                )
+                lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+                crons = []
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    is_comment = stripped.startswith("#")
+                    crons.append({"index": i, "line": line, "comment": is_comment})
+                return make_json({"crons": crons, "raw": result.stdout})
+            except Exception as e:
+                return make_json({"error": str(e)})
+        elif action == "save":
+            raw = params.get("b64", [""])[0]
+            if not raw:
+                return make_json({"ok": False, "error": "No content"})
+            try:
+                content = base64.b64decode(raw).decode("utf-8")
+                proc = subprocess.run(
+                    ["crontab", "-"],
+                    input=content, capture_output=True, text=True, timeout=5
+                )
+                if proc.returncode == 0:
+                    return make_json({"ok": True})
+                return make_json({"ok": False, "error": proc.stderr.strip()})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+        elif action == "delete":
+            idx = int(params.get("index", ["-1"])[0])
+            try:
+                result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
+                lines = result.stdout.split("\n")
+                if 0 <= idx < len(lines):
+                    lines.pop(idx)
+                    new_content = "\n".join(lines)
+                    proc = subprocess.run(["crontab", "-"], input=new_content, capture_output=True, text=True, timeout=5)
+                    if proc.returncode == 0:
+                        return make_json({"ok": True})
+                    return make_json({"ok": False, "error": proc.stderr.strip()})
+                return make_json({"ok": False, "error": "Invalid index"})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+        elif action == "add":
+            entry = params.get("entry", [""])[0]
+            if not entry:
+                return make_json({"ok": False, "error": "No entry"})
+            try:
+                result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
+                current = result.stdout if result.returncode == 0 else ""
+                if current and not current.endswith("\n"):
+                    current += "\n"
+                current += entry + "\n"
+                proc = subprocess.run(["crontab", "-"], input=current, capture_output=True, text=True, timeout=5)
+                if proc.returncode == 0:
+                    return make_json({"ok": True})
+                return make_json({"ok": False, "error": proc.stderr.strip()})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+        return make_json({"error": "Unknown action"})
+
+    elif path.startswith("/api/diskusage"):
+        target = params.get("path", [user_root])[0]
+        allowed, resolved = validate_path_access(target, user_root)
+        if not allowed:
+            return make_json({"error": "Access denied"})
+        depth = params.get("depth", ["1"])[0]
+        if not depth.isdigit() or int(depth) > 3:
+            depth = "1"
+        try:
+            result = subprocess.run(
+                ["du", "-h", "--max-depth=" + depth, "-t", "1M", resolved],
+                capture_output=True, text=True, timeout=15
+            )
+            entries = []
+            for line in result.stdout.strip().split("\n"):
+                if not line.strip():
+                    continue
+                parts = line.split("\t", 1)
+                if len(parts) == 2:
+                    entries.append({"size": parts[0].strip(), "path": parts[1].strip()})
+            # Sort by size descending (parse human-readable)
+            def parse_size(s):
+                s = s.strip()
+                try:
+                    if s.endswith("G"):
+                        return float(s[:-1]) * 1073741824
+                    if s.endswith("M"):
+                        return float(s[:-1]) * 1048576
+                    if s.endswith("K"):
+                        return float(s[:-1]) * 1024
+                    if s.endswith("T"):
+                        return float(s[:-1]) * 1099511627776
+                    return float(s)
+                except ValueError:
+                    return 0
+            entries.sort(key=lambda x: parse_size(x["size"]), reverse=True)
+            return make_json({"entries": entries[:50], "path": resolved})
+        except subprocess.TimeoutExpired:
+            return make_json({"error": "Scan timed out (directory too large)"})
+        except Exception as e:
+            return make_json({"error": str(e)})
+
+    elif path.startswith("/api/netstat"):
+        try:
+            result = subprocess.run(
+                ["ss", "-tunap"],
+                capture_output=True, text=True, timeout=5
+            )
+            connections = []
+            for line in result.stdout.strip().split("\n")[1:]:
+                parts = line.split()
+                if len(parts) >= 5:
+                    conn = {
+                        "proto": parts[0],
+                        "state": parts[1],
+                        "local": parts[4] if len(parts) > 4 else "",
+                        "peer": parts[5] if len(parts) > 5 else "",
+                        "process": parts[6] if len(parts) > 6 else "",
+                    }
+                    connections.append(conn)
+            # Also get listening ports
+            result2 = subprocess.run(
+                ["ss", "-tlnp"],
+                capture_output=True, text=True, timeout=5
+            )
+            listeners = []
+            for line in result2.stdout.strip().split("\n")[1:]:
+                parts = line.split()
+                if len(parts) >= 4:
+                    listeners.append({
+                        "proto": parts[0],
+                        "local": parts[3] if len(parts) > 3 else "",
+                        "process": parts[5] if len(parts) > 5 else parts[-1],
+                    })
+            return make_json({"connections": connections[:100], "listeners": listeners[:50]})
+        except FileNotFoundError:
+            return make_json({"error": "ss command not found"})
+        except Exception as e:
+            return make_json({"error": str(e)})
+
+    elif path.startswith("/api/services"):
+        action = params.get("action", ["list"])[0]
+        if action == "list":
+            try:
+                result = subprocess.run(
+                    ["systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend"],
+                    capture_output=True, text=True, timeout=10
+                )
+                services = []
+                for line in result.stdout.strip().split("\n"):
+                    if not line.strip():
+                        continue
+                    parts = line.split(None, 4)
+                    if len(parts) >= 4:
+                        services.append({
+                            "name": parts[0].replace(".service", ""),
+                            "load": parts[1],
+                            "active": parts[2],
+                            "sub": parts[3],
+                            "description": parts[4] if len(parts) > 4 else "",
+                        })
+                return make_json({"services": services})
+            except FileNotFoundError:
+                return make_json({"error": "systemctl not found"})
+            except Exception as e:
+                return make_json({"error": str(e)})
+        elif action in ("start", "stop", "restart", "status"):
+            svc = params.get("name", [""])[0]
+            if not svc or not re.match(r'^[a-zA-Z0-9@._-]+$', svc):
+                return make_json({"error": "Invalid service name"})
+            try:
+                result = subprocess.run(
+                    ["systemctl", action, svc],
+                    capture_output=True, text=True, timeout=15
+                )
+                if action == "status":
+                    return make_json({"output": result.stdout + result.stderr})
+                if result.returncode == 0:
+                    return make_json({"ok": True, "message": f"Service {action}: {svc}"})
+                return make_json({"ok": False, "error": result.stderr.strip() or "Command failed"})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+        return make_json({"error": "Unknown action"})
+
+    elif path.startswith("/api/upload"):
+        # File upload via base64 in query params
+        target_dir = params.get("path", [user_root])[0]
+        filename = params.get("name", [""])[0]
+        b64_data = params.get("b64", [""])[0]
+        if not filename or not b64_data:
+            return make_json({"ok": False, "error": "Missing filename or data"})
+        # Sanitize filename
+        safe_name = os.path.basename(filename)
+        if not safe_name or safe_name.startswith("."):
+            return make_json({"ok": False, "error": "Invalid filename"})
+        allowed, resolved_dir = validate_path_access(target_dir, user_root)
+        if not allowed:
+            return make_json({"ok": False, "error": "Access denied"})
+        full_path = os.path.join(resolved_dir, safe_name)
+        if os.path.exists(full_path):
+            return make_json({"ok": False, "error": "File already exists"})
+        try:
+            data = base64.b64decode(b64_data)
+            with open(full_path, "wb") as f:
+                f.write(data)
+            return make_json({"ok": True, "path": full_path, "size": len(data)})
+        except Exception as e:
+            return make_json({"ok": False, "error": str(e)})
+
+    elif path.startswith("/api/download"):
+        file_path = params.get("path", [""])[0]
+        if not file_path or not os.path.isfile(file_path):
+            return make_json({"error": "File not found"})
+        allowed, resolved = validate_path_access(file_path, user_root)
+        if not allowed:
+            return make_json({"error": "Access denied"})
+        size = os.path.getsize(resolved)
+        if size > 50_000_000:  # 50MB limit
+            return make_json({"error": "File too large (max 50MB)"})
+        try:
+            with open(resolved, "rb") as f:
+                data = f.read()
+            fname = os.path.basename(resolved)
+            return make_response(200, data, "application/octet-stream",
+                                 [("Content-Disposition", f'attachment; filename="{fname}"')])
+        except Exception as e:
+            return make_json({"error": str(e)})
+
+    elif path.startswith("/api/bookmarks"):
+        bm_file = os.path.join(session_info["home"], ".servit", "bookmarks.json")
+        os.makedirs(os.path.dirname(bm_file), exist_ok=True)
+        action = params.get("action", ["list"])[0]
+        if action == "list":
+            try:
+                if os.path.isfile(bm_file):
+                    with open(bm_file, "r") as f:
+                        bookmarks = json.load(f)
+                else:
+                    bookmarks = []
+                return make_json({"bookmarks": bookmarks})
+            except Exception:
+                return make_json({"bookmarks": []})
+        elif action == "add":
+            bm_path = params.get("path", [""])[0]
+            bm_name = params.get("name", [""])[0]
+            if not bm_path:
+                return make_json({"ok": False, "error": "No path"})
+            try:
+                bookmarks = []
+                if os.path.isfile(bm_file):
+                    with open(bm_file, "r") as f:
+                        bookmarks = json.load(f)
+                if len(bookmarks) >= 50:
+                    return make_json({"ok": False, "error": "Max 50 bookmarks"})
+                bookmarks.append({"path": bm_path, "name": bm_name or os.path.basename(bm_path)})
+                with open(bm_file, "w") as f:
+                    json.dump(bookmarks, f)
+                return make_json({"ok": True})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+        elif action == "remove":
+            idx = int(params.get("index", ["-1"])[0])
+            try:
+                bookmarks = []
+                if os.path.isfile(bm_file):
+                    with open(bm_file, "r") as f:
+                        bookmarks = json.load(f)
+                if 0 <= idx < len(bookmarks):
+                    bookmarks.pop(idx)
+                    with open(bm_file, "w") as f:
+                        json.dump(bookmarks, f)
+                    return make_json({"ok": True})
+                return make_json({"ok": False, "error": "Invalid index"})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+        return make_json({"error": "Unknown action"})
+
     return make_response(404, b"Unknown API")
 
 

@@ -181,6 +181,7 @@
     $("#btn-edit").style.display = "none";
     $("#btn-save").style.display = "none";
     $("#btn-cancel").style.display = "none";
+    $("#btn-download").style.display = "none";
 
     // Reset viewer body to code view
     const viewerBody = $("#viewer-body");
@@ -227,11 +228,13 @@
       }
 
       // Show edit button for non-binary, non-truncated text files
+      editingPath = path;
       if (!data.binary && !data.truncated) {
-        editingPath = path;
         editingContent = data.content;
         $("#btn-edit").style.display = "flex";
       }
+      // Always show download button
+      $("#btn-download").style.display = "flex";
 
       infoEl.textContent = `${data.language} \u00B7 ${fmtSize(data.size)}`;
 
@@ -1499,9 +1502,435 @@
     }, 500);
   })();
 
+  // ── More Menu ──────────────────────────────────
+  window.toggleMoreMenu = function () {
+    var menu = $("#more-menu");
+    menu.classList.toggle("hidden");
+  };
+  window.closeMoreMenu = function () {
+    $("#more-menu").classList.add("hidden");
+  };
+  // Close menu on outside click
+  document.addEventListener("click", function (e) {
+    var menu = $("#more-menu");
+    var btn = $("#btn-more");
+    if (menu && !menu.classList.contains("hidden") && !menu.contains(e.target) && !btn.contains(e.target)) {
+      menu.classList.add("hidden");
+    }
+  });
+
+  // ── Cron Panel ────────────────────────────────
+  window.openCron = function () {
+    $("#cron-panel").classList.remove("hidden");
+    refreshCron();
+  };
+  window.closeCron = function () {
+    $("#cron-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+  window.refreshCron = async function () {
+    var body = $("#cron-body");
+    body.innerHTML = '<div class="file-loading">불러오는 중...</div>';
+    try {
+      var res = await fetch("/api/cron?action=list");
+      var data = await res.json();
+      if (data.error) {
+        body.innerHTML = '<div class="file-empty">' + escHtml(data.error) + '</div>';
+        return;
+      }
+      if (!data.crons || data.crons.length === 0) {
+        body.innerHTML = '<div class="file-empty">예약 작업 없음</div>';
+        return;
+      }
+      var html = '<div class="cron-list">';
+      data.crons.forEach(function (c) {
+        if (c.comment) {
+          html += '<div class="cron-item comment">';
+          html += '<span class="cron-line">' + escHtml(c.line) + '</span>';
+          html += '</div>';
+        } else {
+          var parts = c.line.trim().split(/\s+/);
+          var schedule = parts.slice(0, 5).join(" ");
+          var cmd = parts.slice(5).join(" ");
+          html += '<div class="cron-item">';
+          html += '<div class="cron-schedule">' + escHtml(schedule) + '</div>';
+          html += '<div class="cron-cmd">' + escHtml(cmd) + '</div>';
+          html += '<button class="cron-del-btn" onclick="deleteCron(' + c.index + ')">';
+          html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
+          html += '</button>';
+          html += '</div>';
+        }
+      });
+      html += '</div>';
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  };
+  window.addCronJob = function () {
+    var schedule = prompt("스케줄 (예: */5 * * * *):");
+    if (!schedule) return;
+    var cmd = prompt("명령어:");
+    if (!cmd) return;
+    var entry = schedule.trim() + " " + cmd.trim();
+    fetch("/api/cron?action=add&entry=" + encodeURIComponent(entry))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) { showToast("추가 완료"); refreshCron(); }
+        else showToast(data.error || "추가 실패", true);
+      })
+      .catch(function (e) { showToast("오류: " + e.message, true); });
+  };
+  window.deleteCron = function (idx) {
+    if (!confirm("이 예약 작업을 삭제하시겠습니까?")) return;
+    fetch("/api/cron?action=delete&index=" + idx)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) { showToast("삭제 완료"); refreshCron(); }
+        else showToast(data.error || "삭제 실패", true);
+      })
+      .catch(function (e) { showToast("오류: " + e.message, true); });
+  };
+
+  // ── Disk Usage Panel ──────────────────────────
+  var diskCurrentPath = "";
+  window.openDisk = function () {
+    $("#disk-panel").classList.remove("hidden");
+    diskCurrentPath = userHome || "";
+    fetchDisk(diskCurrentPath);
+  };
+  window.closeDisk = function () {
+    $("#disk-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+  window.refreshDisk = function () {
+    fetchDisk(diskCurrentPath);
+  };
+  async function fetchDisk(path) {
+    var body = $("#disk-body");
+    body.innerHTML = '<div class="file-loading">분석 중... (시간이 걸릴 수 있습니다)</div>';
+    try {
+      var res = await fetch("/api/diskusage?path=" + encodeURIComponent(path));
+      var data = await res.json();
+      if (data.error) {
+        body.innerHTML = '<div class="file-empty">' + escHtml(data.error) + '</div>';
+        return;
+      }
+      diskCurrentPath = data.path;
+      var html = '<div class="disk-path">' + escHtml(data.path) + '</div>';
+      if (data.path && data.path !== "/") {
+        html += '<button class="disk-parent-btn" onclick="fetchDisk(\'' + escHtml(data.path.replace(/\/[^/]+\/?$/, "") || "/").replace(/'/g, "\\'") + '\')">.. 상위 디렉토리</button>';
+      }
+      html += '<div class="disk-list">';
+      var maxSize = 0;
+      var parsedEntries = data.entries.map(function (e) {
+        var bytes = parseDiskSize(e.size);
+        if (bytes > maxSize) maxSize = bytes;
+        return { size: e.size, path: e.path, bytes: bytes };
+      });
+      parsedEntries.forEach(function (e) {
+        var pct = maxSize > 0 ? (e.bytes / maxSize * 100) : 0;
+        var name = e.path.split("/").pop() || e.path;
+        var isDir = true;
+        html += '<div class="disk-item" onclick="fetchDisk(\'' + escHtml(e.path).replace(/'/g, "\\'") + '\')">';
+        html += '<div class="disk-item-top"><span class="disk-item-name">' + escHtml(name) + '</span><span class="disk-item-size">' + escHtml(e.size) + '</span></div>';
+        html += '<div class="stat-bar-wrap"><div class="stat-bar ' + (pct > 80 ? "danger" : pct > 50 ? "warn" : "") + '" style="width:' + pct + '%"></div></div>';
+        html += '</div>';
+      });
+      html += '</div>';
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="file-empty">분석 실패</div>';
+    }
+  }
+  function parseDiskSize(s) {
+    s = s.trim();
+    try {
+      if (s.endsWith("G")) return parseFloat(s) * 1073741824;
+      if (s.endsWith("M")) return parseFloat(s) * 1048576;
+      if (s.endsWith("K")) return parseFloat(s) * 1024;
+      if (s.endsWith("T")) return parseFloat(s) * 1099511627776;
+      return parseFloat(s) || 0;
+    } catch (e) { return 0; }
+  }
+
+  // ── Network Panel ─────────────────────────────
+  window.openNet = function () {
+    $("#net-panel").classList.remove("hidden");
+    refreshNet();
+  };
+  window.closeNet = function () {
+    $("#net-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+  window.refreshNet = async function () {
+    var body = $("#net-body");
+    body.innerHTML = '<div class="file-loading">불러오는 중...</div>';
+    try {
+      var res = await fetch("/api/netstat");
+      var data = await res.json();
+      if (data.error) {
+        body.innerHTML = '<div class="file-empty">' + escHtml(data.error) + '</div>';
+        return;
+      }
+      var html = '';
+      // Listeners
+      if (data.listeners && data.listeners.length > 0) {
+        html += '<div class="net-section-title">열린 포트 (LISTEN)</div>';
+        html += '<div class="net-list">';
+        data.listeners.forEach(function (l) {
+          html += '<div class="net-item listen">';
+          html += '<span class="net-proto">' + escHtml(l.proto) + '</span>';
+          html += '<span class="net-addr">' + escHtml(l.local) + '</span>';
+          html += '<span class="net-proc">' + escHtml(l.process || "") + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      // Active connections
+      if (data.connections && data.connections.length > 0) {
+        html += '<div class="net-section-title">활성 연결</div>';
+        html += '<div class="net-list">';
+        data.connections.forEach(function (c) {
+          var stateClass = c.state === "ESTAB" ? "estab" : c.state === "LISTEN" ? "listen" : "";
+          html += '<div class="net-item ' + stateClass + '">';
+          html += '<span class="net-proto">' + escHtml(c.proto) + '</span>';
+          html += '<span class="net-state">' + escHtml(c.state) + '</span>';
+          html += '<span class="net-addr">' + escHtml(c.local) + '</span>';
+          html += '<span class="net-peer">' + escHtml(c.peer) + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      if (!html) html = '<div class="file-empty">연결 없음</div>';
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  };
+
+  // ── Services Panel ────────────────────────────
+  var allServices = [];
+  window.openServices = function () {
+    $("#services-panel").classList.remove("hidden");
+    refreshServices();
+  };
+  window.closeServices = function () {
+    $("#services-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+  window.refreshServices = async function () {
+    var body = $("#services-body");
+    body.innerHTML = '<div class="file-loading">불러오는 중...</div>';
+    try {
+      var res = await fetch("/api/services?action=list");
+      var data = await res.json();
+      if (data.error) {
+        body.innerHTML = '<div class="file-empty">' + escHtml(data.error) + '</div>';
+        return;
+      }
+      allServices = data.services || [];
+      renderServices(allServices);
+    } catch (e) {
+      body.innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  };
+  window.filterServices = function () {
+    var q = ($("#svc-search") || {}).value || "";
+    q = q.toLowerCase();
+    var filtered = allServices.filter(function (s) {
+      return s.name.toLowerCase().indexOf(q) >= 0 || (s.description || "").toLowerCase().indexOf(q) >= 0;
+    });
+    renderServices(filtered);
+  };
+  function renderServices(services) {
+    var body = $("#services-body");
+    if (!services || services.length === 0) {
+      body.innerHTML = '<div class="file-empty">서비스 없음</div>';
+      return;
+    }
+    var html = '<div class="svc-list">';
+    services.forEach(function (s) {
+      var stateClass = s.active === "active" ? "running" : s.active === "failed" ? "failed" : "inactive";
+      html += '<div class="svc-item">';
+      html += '<div class="svc-top">';
+      html += '<span class="docker-status-badge ' + (stateClass === "running" ? "running" : stateClass === "failed" ? "exited" : "other") + '"></span>';
+      html += '<span class="svc-name">' + escHtml(s.name) + '</span>';
+      html += '<span class="svc-sub">' + escHtml(s.sub) + '</span>';
+      html += '</div>';
+      if (s.description) html += '<div class="svc-desc">' + escHtml(s.description) + '</div>';
+      html += '<div class="docker-actions">';
+      if (s.active !== "active") {
+        html += '<button class="docker-action-btn start" onclick="svcAction(\'start\',\'' + escHtml(s.name) + '\')">시작</button>';
+      } else {
+        html += '<button class="docker-action-btn stop" onclick="svcAction(\'stop\',\'' + escHtml(s.name) + '\')">중지</button>';
+      }
+      html += '<button class="docker-action-btn restart" onclick="svcAction(\'restart\',\'' + escHtml(s.name) + '\')">재시작</button>';
+      html += '<button class="docker-action-btn logs" onclick="svcStatus(\'' + escHtml(s.name) + '\')">상태</button>';
+      html += '</div>';
+      html += '<div id="svc-status-' + escHtml(s.name) + '" class="svc-status-output"></div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  }
+  window.svcAction = async function (action, name) {
+    showToast(action + " 요청 중...");
+    try {
+      var res = await fetch("/api/services?action=" + action + "&name=" + encodeURIComponent(name));
+      var data = await res.json();
+      if (data.ok) {
+        showToast("완료: " + action);
+        setTimeout(refreshServices, 1000);
+      } else {
+        showToast(data.error || "실패", true);
+      }
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+  window.svcStatus = async function (name) {
+    var el = document.getElementById("svc-status-" + name);
+    if (!el) return;
+    if (el.innerHTML) { el.innerHTML = ""; return; }
+    el.innerHTML = '<div class="docker-logs-view">불러오는 중...</div>';
+    try {
+      var res = await fetch("/api/services?action=status&name=" + encodeURIComponent(name));
+      var data = await res.json();
+      el.innerHTML = '<div class="docker-logs-view">' + escHtml(data.output || data.error || "정보 없음") + '</div>';
+    } catch (e) {
+      el.innerHTML = '<div class="docker-logs-view">불러오기 실패</div>';
+    }
+  };
+
+  // ── File Upload ───────────────────────────────
+  window.openUpload = function () {
+    var input = document.createElement("input");
+    input.type = "file";
+    input.onchange = function () {
+      var file = input.files[0];
+      if (!file) return;
+      if (file.size > 10 * 1048576) {
+        showToast("파일 크기 제한: 최대 10MB", true);
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var b64 = reader.result.split(",")[1];
+        var targetDir = currentDir || userHome || "";
+        showToast(file.name + " 업로드 중...");
+        fetch("/api/upload?path=" + encodeURIComponent(targetDir) + "&name=" + encodeURIComponent(file.name) + "&b64=" + encodeURIComponent(b64))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              showToast("업로드 완료: " + file.name + " (" + fmtSize(data.size) + ")");
+              if (currentDir) loadTree(currentDir);
+            } else {
+              showToast(data.error || "업로드 실패", true);
+            }
+          })
+          .catch(function (e) { showToast("업로드 실패: " + e.message, true); });
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  // ── File Download (called from file viewer or sidebar) ─
+  window.downloadFile = function (path) {
+    if (!path) return;
+    window.open("/api/download?path=" + encodeURIComponent(path), "_blank");
+  };
+
+  // ── Bookmarks ─────────────────────────────────
+  window.openBookmarks = function () {
+    var panel = document.createElement("div");
+    panel.id = "bookmark-popup";
+    panel.className = "popup-overlay";
+    panel.innerHTML = '<div class="popup-card"><div class="pp-title">즐겨찾기</div><div id="bookmark-list"><div class="file-loading">불러오는 중...</div></div><div class="bookmark-actions"><button onclick="addBookmark()">현재 경로 추가</button><button onclick="closeBookmarkPopup()">닫기</button></div></div>';
+    document.body.appendChild(panel);
+    fetchBookmarks();
+  };
+  window.closeBookmarkPopup = function () {
+    var popup = document.getElementById("bookmark-popup");
+    if (popup) popup.remove();
+  };
+  async function fetchBookmarks() {
+    var el = document.getElementById("bookmark-list");
+    if (!el) return;
+    try {
+      var res = await fetch("/api/bookmarks?action=list");
+      var data = await res.json();
+      if (!data.bookmarks || data.bookmarks.length === 0) {
+        el.innerHTML = '<div class="file-empty" style="padding:16px">즐겨찾기 없음</div>';
+        return;
+      }
+      var html = "";
+      data.bookmarks.forEach(function (b, i) {
+        html += '<div class="bookmark-item">';
+        html += '<span class="bookmark-name" onclick="goToBookmark(\'' + escHtml(b.path).replace(/'/g, "\\'") + '\')">' + escHtml(b.name) + '</span>';
+        html += '<span class="bookmark-path">' + escHtml(b.path) + '</span>';
+        html += '<button class="bookmark-del" onclick="removeBookmark(' + i + ')">X</button>';
+        html += '</div>';
+      });
+      el.innerHTML = html;
+    } catch (e) {
+      el.innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  }
+  window.addBookmark = function () {
+    var path = currentDir || userHome;
+    if (!path) { showToast("경로를 먼저 열어주세요", true); return; }
+    var name = prompt("즐겨찾기 이름:", path.split("/").pop() || path);
+    if (!name) return;
+    fetch("/api/bookmarks?action=add&path=" + encodeURIComponent(path) + "&name=" + encodeURIComponent(name))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) { showToast("추가 완료"); fetchBookmarks(); }
+        else showToast(data.error || "추가 실패", true);
+      });
+  };
+  window.removeBookmark = function (idx) {
+    fetch("/api/bookmarks?action=remove&index=" + idx)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) { showToast("삭제 완료"); fetchBookmarks(); }
+        else showToast(data.error || "삭제 실패", true);
+      });
+  };
+  window.goToBookmark = function (path) {
+    closeBookmarkPopup();
+    toggleSidebar();
+    setTimeout(function () { loadTree(path); }, 200);
+  };
+
+  // ── Server Alerts (threshold warnings in monitor) ─
+  var alertThresholds = { cpu: 85, memory: 85, disk: 90 };
+  var lastAlertTime = {};
+
+  function checkAlerts(s) {
+    var now = Date.now();
+    var cpuPct = Math.min(s.cpu.percent, 100);
+    if (cpuPct >= alertThresholds.cpu && (!lastAlertTime.cpu || now - lastAlertTime.cpu > 60000)) {
+      showToast("CPU 경고: " + cpuPct + "% 사용 중", true);
+      lastAlertTime.cpu = now;
+    }
+    if (s.memory.percent >= alertThresholds.memory && (!lastAlertTime.memory || now - lastAlertTime.memory > 60000)) {
+      showToast("메모리 경고: " + s.memory.percent + "% 사용 중", true);
+      lastAlertTime.memory = now;
+    }
+    if (s.disk.percent >= alertThresholds.disk && (!lastAlertTime.disk || now - lastAlertTime.disk > 60000)) {
+      showToast("디스크 경고: " + s.disk.percent + "% 사용 중", true);
+      lastAlertTime.disk = now;
+    }
+  }
+
   // ── Override renderMonitor to use tabs ─────────
   // Replace the original renderMonitor with the tabbed version
-  renderMonitor = renderMonitorWithTabs;
+  renderMonitor = function (s) {
+    checkAlerts(s);
+    renderMonitorWithTabs(s);
+  };
 
   // ── Init ───────────────────────────────────────
   initTerminal();
