@@ -908,6 +908,32 @@
       $("#topbar-label").textContent = "Terminal";
       wsReconnectDelay = 1000; // reset backoff
       setTimeout(sendResize, 200);
+
+      // Auto-SSH: check if login page set a target
+      setTimeout(function() {
+        try {
+          var sshData = sessionStorage.getItem("servit_auto_ssh");
+          if (sshData) {
+            sessionStorage.removeItem("servit_auto_ssh");
+            var ssh = JSON.parse(sshData);
+            if (ssh && ssh.host) {
+              var cmd = "ssh";
+              if (ssh.jumpHost) {
+                cmd += " -J " + ssh.jumpHost;
+              }
+              cmd += " -o StrictHostKeyChecking=accept-new";
+              if (ssh.port && ssh.port !== 22) {
+                cmd += " -p " + ssh.port;
+              }
+              cmd += " " + ssh.host;
+              showToast("SSH 연결 중: " + ssh.host);
+              sendWs(cmd + "\n");
+            }
+          }
+        } catch (e) {
+          /* ignore auto-ssh errors */
+        }
+      }, 500);
     };
 
     ws.onmessage = (e) => {
