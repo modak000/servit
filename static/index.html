@@ -295,6 +295,96 @@
     </div>
   </div>
 
+  <!-- Training Monitor panel -->
+  <div id="training-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Training Monitor</span>
+        <span class="panel-subtitle">GPU 학습 모니터</span>
+      </div>
+      <button class="icon-btn" onclick="refreshTraining()" aria-label="Refresh">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="icon-btn" onclick="closeTraining()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="training-body">
+      <div class="monitor-loading">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- Snippets panel -->
+  <div id="snippets-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Snippets</span>
+        <span class="panel-subtitle">명령어 스니펫</span>
+      </div>
+      <div id="snippet-search-wrap">
+        <input type="text" id="snippet-search" placeholder="검색..." autocomplete="off" oninput="filterSnippets()">
+      </div>
+      <button class="icon-btn" onclick="addSnippet()" aria-label="Add">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="icon-btn" onclick="closeSnippets()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="snippet-tabs"></div>
+    <div id="snippets-body"><div class="file-empty">불러오는 중...</div></div>
+  </div>
+
+  <!-- Alert Config panel -->
+  <div id="alert-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Alerts</span>
+        <span class="panel-subtitle">알림 설정</span>
+      </div>
+      <button class="icon-btn" onclick="closeAlertConfig()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="alert-body"><div class="monitor-loading">불러오는 중...</div></div>
+  </div>
+
+  <!-- Share URL popup -->
+  <div id="share-popup" class="hidden">
+    <div class="overlay-backdrop" onclick="closeSharePopup()"></div>
+    <div class="popup-card">
+      <div class="pp-title">터미널 공유</div>
+      <div id="share-popup-body">
+        <p id="share-status-text" style="color:var(--text2);font-size:13px;margin-bottom:12px;">공유가 비활성 상태입니다.</p>
+        <input type="text" id="share-url-input" class="sf-input" readonly style="margin-bottom:12px;display:none">
+        <div style="display:flex;gap:8px">
+          <button class="sf-save-btn" id="share-toggle-btn" onclick="toggleShareState()">공유 시작</button>
+          <button class="sf-cancel-btn" onclick="closeSharePopup()">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transfer destination picker -->
+  <div id="transfer-popup" class="hidden">
+    <div class="overlay-backdrop" onclick="closeTransferPopup()"></div>
+    <div class="popup-card">
+      <div class="pp-title" id="transfer-title">복사 대상 선택</div>
+      <div id="transfer-body">
+        <label class="sf-label">대상 경로</label>
+        <input type="text" id="transfer-dst" class="sf-input" placeholder="/path/to/destination" autocomplete="off">
+        <label class="sf-label" style="margin-top:8px">서버 (선택, 비워두면 로컬)</label>
+        <select id="transfer-server" class="sf-input">
+          <option value="">로컬</option>
+        </select>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="sf-save-btn" onclick="executeTransfer()">전송</button>
+          <button class="sf-cancel-btn" onclick="closeTransferPopup()">취소</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Pane picker overlay -->
   <div id="pane-picker" class="hidden">
     <div class="overlay-backdrop" onclick="closePanePicker()"></div>
@@ -342,6 +432,18 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
       </button>
       <div id="more-menu" class="hidden">
+        <button onclick="openTraining(); closeMoreMenu()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/><circle cx="12" cy="12" r="1"/></svg>
+          Training Monitor
+        </button>
+        <button onclick="openSnippets(); closeMoreMenu()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          명령어 스니펫
+        </button>
+        <button onclick="openAlertConfig(); closeMoreMenu()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+          알림 설정
+        </button>
         <button onclick="openCron(); closeMoreMenu()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           Crontab
@@ -371,9 +473,13 @@
           SSH 서버
         </button>
       </div>
+      <button class="icon-btn" id="btn-share" onclick="toggleShare()" aria-label="Share" title="터미널 공유">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      </button>
       <div id="topbar-title">
         <span id="status-dot"></span>
         <span id="topbar-label">Terminal</span>
+        <span id="alert-badge" class="hidden">0</span>
       </div>
       <button class="icon-btn" onclick="logout()" aria-label="Logout">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>

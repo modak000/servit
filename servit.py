@@ -44,6 +44,7 @@ from websockets.http11 import Request, Response
 STATIC_DIR = Path(__file__).parent / "static"
 HOST = "0.0.0.0"
 PORT = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8765
+SERVIT_DIR = Path.home() / ".servit"
 
 # ── Auth ──────────────────────────────────────────────────────────────
 # Mode 1 (default): --system-auth  → validate against real Linux passwords via su
@@ -84,6 +85,27 @@ LOCKOUT_DURATION = 600   # 10분 잠금
 API_RATE_LIMITS = {}
 API_RATE_MAX = 100       # max requests per minute
 API_RATE_WINDOW = 60     # 1 minute window
+
+
+# ── Training Monitor: GPU history ──────────────────────────────────
+GPU_HISTORY = []  # list of {timestamp, gpus: [{util, mem_used, mem_total, temp, power}]}
+GPU_HISTORY_MAX = 100
+GPU_HISTORY_INTERVAL = 5  # seconds
+_gpu_history_task = None
+
+# ── Alert System ──────────────────────────────────────────────────
+ALERT_HISTORY = []  # list of {timestamp, level, message}
+ALERT_HISTORY_MAX = 50
+ALERT_COOLDOWNS = {}  # key -> last_alert_time
+ALERT_COOLDOWN_SEC = 300  # 5 min
+PENDING_ALERTS = []  # alerts to show as toast on next frontend poll
+_alert_task = None
+
+# ── Terminal Sharing ──────────────────────────────────────────────
+SHARE_STATE = {"active": False, "token": None, "viewers": set()}
+
+# ── Transfer tracking ────────────────────────────────────────────
+ACTIVE_TRANSFERS = {}  # id -> {status, src, dst, pid, started}
 
 
 def check_rate_limit(ip):
@@ -350,15 +372,26 @@ async def process_request(connection, request):
         qs = request.path.split("?")[-1] if "?" in request.path else ""
         import urllib.parse
         params = urllib.parse.parse_qs(qs)
+
+        # Check share token for read-only viewer
+        share_token = params.get("share", [""])[0]
+        if share_token and SHARE_STATE.get("active") and SHARE_STATE.get("token") == share_token:
+            connection.session_info = {"username": "_viewer_", "home": "/tmp"}
+            connection.share_viewer = True
+            SHARE_STATE.get("viewers", set()).add(id(connection))
+            return None
+
         token = params.get("token", [""])[0]
         if token and token in ACTIVE_TOKENS:
             # Stash session info on the connection for later use
             connection.session_info = ACTIVE_TOKENS[token]
+            connection.share_viewer = False
             return None
         # Also check cookie
         cookie_token = check_auth(request)
         if cookie_token:
             connection.session_info = ACTIVE_TOKENS[cookie_token]
+            connection.share_viewer = False
             return None
         return make_response(403, b"Forbidden")
 
@@ -1388,6 +1421,373 @@ def handle_api(path, request, session_info):
 
         return make_json({"error": "Unknown action"})
 
+    elif path.startswith("/api/training"):
+        action = params.get("action", ["status"])[0]
+        if action == "status":
+            # Return current GPU stats + history
+            try:
+                result = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
+                     "--format=csv,nounits,noheader"],
+                    capture_output=True, text=True, timeout=5
+                )
+                gpus = []
+                for line in result.stdout.strip().split("\n"):
+                    if not line.strip():
+                        continue
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 5:
+                        gpu_data = {
+                            "name": parts[0],
+                            "util": int(parts[1]) if parts[1].isdigit() else 0,
+                            "memory_used": int(parts[2]) if parts[2].isdigit() else 0,
+                            "memory_total": int(parts[3]) if parts[3].isdigit() else 0,
+                            "temp": int(parts[4]) if parts[4].isdigit() else 0,
+                            "power": parts[5] if len(parts) > 5 else "0",
+                        }
+                        gpus.append(gpu_data)
+                # Build history arrays per GPU
+                gpu_result = []
+                for i, gpu in enumerate(gpus):
+                    util_hist = [h["gpus"][i]["util"] for h in GPU_HISTORY if i < len(h.get("gpus", []))]
+                    mem_hist = [h["gpus"][i]["mem_used"] for h in GPU_HISTORY if i < len(h.get("gpus", []))]
+                    gpu_result.append({
+                        "name": gpu["name"],
+                        "util": gpu["util"],
+                        "util_history": util_hist[-60:],
+                        "mem_history": mem_hist[-60:],
+                        "memory_used": gpu["memory_used"],
+                        "memory_total": gpu["memory_total"],
+                        "temp": gpu["temp"],
+                        "power": gpu["power"],
+                    })
+                return make_json({"gpus": gpu_result, "timestamp": time.time()})
+            except Exception:
+                return make_json({"gpus": [], "timestamp": time.time()})
+
+        elif action == "logs":
+            log_path = params.get("path", [""])[0]
+            pattern = params.get("pattern", ["loss"])[0]
+            if not log_path:
+                return make_json({"error": "No log path specified"})
+            allowed, resolved = validate_path_access(log_path, user_root)
+            if not allowed:
+                return make_json({"error": "Access denied"})
+            log_path = resolved
+            if not os.path.isfile(log_path):
+                return make_json({"error": "File not found"})
+            try:
+                values = []
+                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                    for line_num, line in enumerate(f):
+                        if len(values) > 5000:
+                            break
+                        entry = {}
+                        # Extract common training metrics
+                        for pat_name, pat_re in [
+                            ("loss", r'loss[:\s=]+([0-9]+\.?[0-9]*)'),
+                            ("lr", r'lr[:\s=]+([0-9]+\.?[0-9eE\-]*)'),
+                            ("epoch", r'epoch[:\s=]+([0-9]+\.?[0-9]*)'),
+                            ("step", r'step[:\s=]+([0-9]+)'),
+                        ]:
+                            m = re.search(pat_re, line, re.IGNORECASE)
+                            if m:
+                                try:
+                                    entry[pat_name] = float(m.group(1))
+                                except ValueError:
+                                    pass
+                        if entry:
+                            entry["line"] = line_num + 1
+                            values.append(entry)
+                return make_json({"values": values, "filename": os.path.basename(log_path)})
+            except Exception as e:
+                return make_json({"error": str(e)})
+
+        elif action == "watch":
+            log_path = params.get("path", [""])[0]
+            if not log_path:
+                return make_json({"error": "No log path specified"})
+            allowed, resolved = validate_path_access(log_path, user_root)
+            if not allowed:
+                return make_json({"error": "Access denied"})
+            log_path = resolved
+            if not os.path.isfile(log_path):
+                return make_json({"error": "File not found"})
+            try:
+                result = subprocess.run(
+                    ["tail", "-n", "50", log_path],
+                    capture_output=True, text=True, timeout=5
+                )
+                return make_json({"content": result.stdout, "path": log_path})
+            except Exception as e:
+                return make_json({"error": str(e)})
+
+        return make_json({"error": "Unknown action"})
+
+    elif path.startswith("/api/alerts"):
+        action = params.get("action", ["config"])[0]
+        alerts_file = os.path.join(session_info["home"], ".servit", "alerts.json")
+        os.makedirs(os.path.dirname(alerts_file), exist_ok=True)
+
+        def load_alert_config():
+            try:
+                if os.path.isfile(alerts_file):
+                    with open(alerts_file, "r") as f:
+                        return json.load(f)
+            except Exception:
+                pass
+            return {
+                "telegram_bot_token": "",
+                "telegram_chat_id": "",
+                "thresholds": {"cpu": 90, "memory": 90, "disk": 95, "gpu_util": 95, "gpu_temp": 85},
+            }
+
+        def save_alert_config(cfg):
+            with open(alerts_file, "w") as f:
+                json.dump(cfg, f, indent=2)
+
+        if action == "config":
+            return make_json({"config": load_alert_config()})
+
+        elif action == "set":
+            cfg = load_alert_config()
+            for key in ["telegram_bot_token", "telegram_chat_id"]:
+                if key in params:
+                    cfg[key] = params[key][0]
+            for key in ["cpu", "memory", "disk", "gpu_util", "gpu_temp"]:
+                if key in params:
+                    try:
+                        cfg["thresholds"][key] = int(params[key][0])
+                    except ValueError:
+                        pass
+            try:
+                save_alert_config(cfg)
+                return make_json({"ok": True})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+
+        elif action == "test":
+            cfg = load_alert_config()
+            msg = "Servit Alert Test - 알림 테스트 메시지입니다."
+            alert_entry = {"timestamp": time.time(), "level": "info", "message": msg}
+            ALERT_HISTORY.append(alert_entry)
+            if len(ALERT_HISTORY) > ALERT_HISTORY_MAX:
+                ALERT_HISTORY.pop(0)
+            PENDING_ALERTS.append(alert_entry)
+            # Try Telegram
+            tg_result = ""
+            if cfg.get("telegram_bot_token") and cfg.get("telegram_chat_id"):
+                try:
+                    import urllib.request
+                    url = f"https://api.telegram.org/bot{cfg['telegram_bot_token']}/sendMessage"
+                    payload = json.dumps({"chat_id": cfg["telegram_chat_id"], "text": msg}).encode()
+                    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+                    urllib.request.urlopen(req, timeout=5)
+                    tg_result = "Telegram sent"
+                except Exception as e:
+                    tg_result = f"Telegram failed: {e}"
+            return make_json({"ok": True, "telegram": tg_result})
+
+        elif action == "history":
+            return make_json({"alerts": ALERT_HISTORY[-50:]})
+
+        elif action == "pending":
+            pending = list(PENDING_ALERTS)
+            PENDING_ALERTS.clear()
+            return make_json({"alerts": pending})
+
+        return make_json({"error": "Unknown action"})
+
+    elif path.startswith("/api/transfer"):
+        action = params.get("action", [""])[0]
+        if action == "copy" or action == "move":
+            src = params.get("src", [""])[0]
+            dst = params.get("dst", [""])[0]
+            server = params.get("server", [""])[0]
+            if not src or not dst:
+                return make_json({"ok": False, "error": "src and dst required"})
+            allowed_src, resolved_src = validate_path_access(src, user_root)
+            if not allowed_src:
+                return make_json({"ok": False, "error": "Access denied: source path"})
+
+            if server:
+                # Remote copy via scp
+                servers_file = os.path.join(session_info["home"], ".servit", "servers.json")
+                try:
+                    with open(servers_file, "r") as f:
+                        servers = json.load(f)
+                except Exception:
+                    return make_json({"ok": False, "error": "No servers configured"})
+                srv = next((s for s in servers if s.get("name") == server), None)
+                if not srv:
+                    return make_json({"ok": False, "error": "Server not found"})
+                # Validate fields
+                for field_val in [srv.get("host", ""), srv.get("username", "")]:
+                    if re.search(r'[;&|`$(){}\\"\'\n\r]', field_val):
+                        return make_json({"ok": False, "error": "Invalid server config"})
+                scp_cmd = ["scp", "-o", "StrictHostKeyChecking=accept-new"]
+                if srv.get("key_path"):
+                    scp_cmd.extend(["-i", srv["key_path"]])
+                if srv.get("port") and srv["port"] != 22:
+                    scp_cmd.extend(["-P", str(srv["port"])])
+                if os.path.isdir(resolved_src):
+                    scp_cmd.append("-r")
+                scp_cmd.append(resolved_src)
+                scp_cmd.append(f"{srv['username']}@{srv['host']}:{dst}")
+                try:
+                    transfer_id = secrets.token_hex(8)
+                    proc = subprocess.Popen(scp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    ACTIVE_TRANSFERS[transfer_id] = {
+                        "status": "running", "src": src, "dst": f"{server}:{dst}",
+                        "pid": proc.pid, "started": time.time()
+                    }
+                    # Wait in background (non-blocking for response)
+                    import threading
+                    def _wait():
+                        proc.wait()
+                        ACTIVE_TRANSFERS[transfer_id]["status"] = "done" if proc.returncode == 0 else "error"
+                    threading.Thread(target=_wait, daemon=True).start()
+                    return make_json({"ok": True, "transfer_id": transfer_id, "message": "Transfer started"})
+                except Exception as e:
+                    return make_json({"ok": False, "error": str(e)})
+            else:
+                # Local copy/move
+                allowed_dst, resolved_dst = validate_path_access(dst, user_root)
+                if not allowed_dst:
+                    return make_json({"ok": False, "error": "Access denied: destination path"})
+                try:
+                    if action == "copy":
+                        if os.path.isdir(resolved_src):
+                            import shutil
+                            shutil.copytree(resolved_src, resolved_dst)
+                        else:
+                            import shutil
+                            shutil.copy2(resolved_src, resolved_dst)
+                    else:
+                        import shutil
+                        shutil.move(resolved_src, resolved_dst)
+                    return make_json({"ok": True})
+                except Exception as e:
+                    return make_json({"ok": False, "error": str(e)})
+
+        elif action == "progress":
+            transfer_id = params.get("id", [""])[0]
+            if transfer_id and transfer_id in ACTIVE_TRANSFERS:
+                return make_json({"transfer": ACTIVE_TRANSFERS[transfer_id]})
+            return make_json({"transfers": {k: v for k, v in ACTIVE_TRANSFERS.items() if v["status"] == "running"}})
+
+        return make_json({"error": "Unknown action"})
+
+    elif path.startswith("/api/share"):
+        action = params.get("action", ["status"])[0]
+        if action == "start":
+            token = secrets.token_hex(16)
+            SHARE_STATE["active"] = True
+            SHARE_STATE["token"] = token
+            return make_json({"ok": True, "token": token})
+        elif action == "stop":
+            SHARE_STATE["active"] = False
+            SHARE_STATE["token"] = None
+            SHARE_STATE["viewers"] = set()
+            return make_json({"ok": True})
+        elif action == "status":
+            return make_json({
+                "active": SHARE_STATE["active"],
+                "token": SHARE_STATE["token"] if SHARE_STATE["active"] else None,
+                "viewers": len(SHARE_STATE.get("viewers", set())),
+            })
+        return make_json({"error": "Unknown action"})
+
+    elif path.startswith("/api/snippets"):
+        snippets_file = os.path.join(session_info["home"], ".servit", "snippets.json")
+        os.makedirs(os.path.dirname(snippets_file), exist_ok=True)
+        action = params.get("action", ["list"])[0]
+
+        DEFAULT_SNIPPETS = [
+            {"name": "GPU Status", "command": "nvidia-smi", "category": "system", "description": "GPU 상태 확인"},
+            {"name": "Disk Usage", "command": "df -h", "category": "system", "description": "디스크 사용량"},
+            {"name": "Memory", "command": "free -h", "category": "system", "description": "메모리 사용량"},
+            {"name": "Process Top", "command": "ps aux --sort=-%cpu | head 20", "category": "system", "description": "CPU 상위 프로세스"},
+            {"name": "Git Status", "command": "git status", "category": "git", "description": "Git 상태"},
+            {"name": "Git Log", "command": "git log --oneline -20", "category": "git", "description": "최근 커밋"},
+            {"name": "Docker PS", "command": "docker ps -a", "category": "docker", "description": "도커 컨테이너"},
+            {"name": "Training Loss", "command": "tail -f train.log | grep loss", "category": "ml", "description": "학습 손실 모니터"},
+            {"name": "Kill GPU Process", "command": "nvidia-smi --query-compute-apps=pid --format=csv,noheader | xargs -I{} kill {}", "category": "ml", "description": "GPU 프로세스 종료"},
+            {"name": "Claude Code", "command": "claude", "category": "claude", "description": "Claude Code 실행"},
+        ]
+
+        def load_snippets():
+            try:
+                if os.path.isfile(snippets_file):
+                    with open(snippets_file, "r") as f:
+                        return json.load(f)
+            except Exception:
+                pass
+            # First run: return defaults and save
+            try:
+                with open(snippets_file, "w") as f:
+                    json.dump(DEFAULT_SNIPPETS, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+            return list(DEFAULT_SNIPPETS)
+
+        def save_snippets(snippets):
+            with open(snippets_file, "w") as f:
+                json.dump(snippets, f, indent=2, ensure_ascii=False)
+
+        if action == "list":
+            return make_json({"snippets": load_snippets()})
+
+        elif action == "save":
+            name = params.get("name", [""])[0]
+            command = params.get("command", [""])[0]
+            category = params.get("category", ["custom"])[0]
+            description = params.get("description", [""])[0]
+            if not name or not command:
+                return make_json({"ok": False, "error": "Name and command required"})
+            snippets = load_snippets()
+            if len(snippets) >= 100:
+                return make_json({"ok": False, "error": "Maximum 100 snippets"})
+            new_snippet = {"name": name, "command": command, "category": category, "description": description}
+            # Update if exists
+            found = False
+            for i, s in enumerate(snippets):
+                if s.get("name") == name:
+                    snippets[i] = new_snippet
+                    found = True
+                    break
+            if not found:
+                snippets.append(new_snippet)
+            try:
+                save_snippets(snippets)
+                return make_json({"ok": True})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+
+        elif action == "delete":
+            name = params.get("name", [""])[0]
+            if not name:
+                return make_json({"ok": False, "error": "No name specified"})
+            snippets = load_snippets()
+            snippets = [s for s in snippets if s.get("name") != name]
+            try:
+                save_snippets(snippets)
+                return make_json({"ok": True})
+            except Exception as e:
+                return make_json({"ok": False, "error": str(e)})
+
+        elif action == "run":
+            name = params.get("name", [""])[0]
+            if not name:
+                return make_json({"error": "No name specified"})
+            snippets = load_snippets()
+            snippet = next((s for s in snippets if s.get("name") == name), None)
+            if not snippet:
+                return make_json({"error": "Snippet not found"})
+            return make_json({"command": snippet["command"]})
+
+        return make_json({"error": "Unknown action"})
+
     elif path.startswith("/api/bookmarks"):
         bm_file = os.path.join(session_info["home"], ".servit", "bookmarks.json")
         os.makedirs(os.path.dirname(bm_file), exist_ok=True)
@@ -1602,6 +2002,9 @@ async def terminal_session(websocket):
     session_id = id(websocket)
     active_sessions.add(session_id)
 
+    # Check if this is a read-only share viewer
+    is_share_viewer = getattr(websocket, "share_viewer", False)
+
     # Get session info from the connection (set during process_request)
     session_info = getattr(websocket, "session_info", {"username": "user", "home": FALLBACK_ROOT or str(Path.home())})
     user_home = session_info.get("home", str(Path.home()))
@@ -1689,6 +2092,8 @@ async def terminal_session(websocket):
                     except json.JSONDecodeError:
                         continue
                     if msg.get("type") == "input":
+                        if is_share_viewer:
+                            continue  # Read-only: ignore input
                         try:
                             os.write(master_fd, msg["data"].encode("utf-8"))
                         except OSError:
@@ -1765,6 +2170,92 @@ def _select_read(fd, timeout):
         return False
 
 
+async def collect_gpu_history():
+    """Background task: collect GPU stats every 5 seconds for history."""
+    while True:
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
+                 "--format=csv,nounits,noheader"],
+                capture_output=True, text=True, timeout=5
+            )
+            gpus = []
+            for line in result.stdout.strip().split("\n"):
+                if not line.strip():
+                    continue
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 4:
+                    gpus.append({
+                        "util": int(parts[0]) if parts[0].isdigit() else 0,
+                        "mem_used": int(parts[1]) if parts[1].isdigit() else 0,
+                        "mem_total": int(parts[2]) if parts[2].isdigit() else 0,
+                        "temp": int(parts[3]) if parts[3].isdigit() else 0,
+                    })
+            if gpus:
+                GPU_HISTORY.append({"timestamp": time.time(), "gpus": gpus})
+                if len(GPU_HISTORY) > GPU_HISTORY_MAX:
+                    GPU_HISTORY.pop(0)
+        except Exception:
+            pass
+        await asyncio.sleep(GPU_HISTORY_INTERVAL)
+
+
+async def check_alerts_background():
+    """Background task: check stats against thresholds every 30 seconds."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            stats = collect_stats()
+            # Load config from default home
+            alerts_file = os.path.join(str(Path.home()), ".servit", "alerts.json")
+            cfg = {"thresholds": {"cpu": 90, "memory": 90, "disk": 95, "gpu_util": 95, "gpu_temp": 85}}
+            try:
+                if os.path.isfile(alerts_file):
+                    with open(alerts_file, "r") as f:
+                        cfg = json.load(f)
+            except Exception:
+                pass
+            thresholds = cfg.get("thresholds", {})
+            now = time.time()
+
+            def _fire(key, msg):
+                if now - ALERT_COOLDOWNS.get(key, 0) < ALERT_COOLDOWN_SEC:
+                    return
+                ALERT_COOLDOWNS[key] = now
+                entry = {"timestamp": now, "level": "warning", "message": msg}
+                ALERT_HISTORY.append(entry)
+                if len(ALERT_HISTORY) > ALERT_HISTORY_MAX:
+                    ALERT_HISTORY.pop(0)
+                PENDING_ALERTS.append(entry)
+                # Try Telegram
+                if cfg.get("telegram_bot_token") and cfg.get("telegram_chat_id"):
+                    try:
+                        import urllib.request
+                        url = f"https://api.telegram.org/bot{cfg['telegram_bot_token']}/sendMessage"
+                        payload = json.dumps({"chat_id": cfg["telegram_chat_id"], "text": f"[Servit] {msg}"}).encode()
+                        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+                        urllib.request.urlopen(req, timeout=5)
+                    except Exception:
+                        pass
+
+            cpu_pct = min(stats.get("cpu", {}).get("percent", 0), 100)
+            if cpu_pct >= thresholds.get("cpu", 90):
+                _fire("cpu", f"CPU {cpu_pct}% (threshold: {thresholds.get('cpu', 90)}%)")
+            mem_pct = stats.get("memory", {}).get("percent", 0)
+            if mem_pct >= thresholds.get("memory", 90):
+                _fire("memory", f"Memory {mem_pct}% (threshold: {thresholds.get('memory', 90)}%)")
+            disk_pct = stats.get("disk", {}).get("percent", 0)
+            if disk_pct >= thresholds.get("disk", 95):
+                _fire("disk", f"Disk {disk_pct}% (threshold: {thresholds.get('disk', 95)}%)")
+            for i, gpu in enumerate(stats.get("gpu", [])):
+                if gpu.get("util", 0) >= thresholds.get("gpu_util", 95):
+                    _fire(f"gpu_util_{i}", f"GPU {i} Util {gpu['util']}% (threshold: {thresholds.get('gpu_util', 95)}%)")
+                if gpu.get("temp", 0) >= thresholds.get("gpu_temp", 85):
+                    _fire(f"gpu_temp_{i}", f"GPU {i} Temp {gpu['temp']}C (threshold: {thresholds.get('gpu_temp', 85)}C)")
+        except Exception:
+            pass
+
+
 async def main():
     precompute_tokens()
 
@@ -1784,6 +2275,10 @@ async def main():
 |  Ctrl+C to stop                                          |
 +----------------------------------------------------------+
 """)
+
+    # Start background tasks
+    asyncio.create_task(collect_gpu_history())
+    asyncio.create_task(check_alerts_background())
 
     async with serve(
         terminal_session, HOST, PORT,

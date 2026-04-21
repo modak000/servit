@@ -2127,10 +2127,623 @@
     renderMonitorWithTabs(s);
   };
 
+  // ══════════════════════════════════════════════════
+  // Feature 1: Training Monitor Dashboard
+  // ══════════════════════════════════════════════════
+  var trainingTimer = null;
+  var trainingLogPath = "";
+  var trainingAutoScroll = true;
+  var trainingLogWatchTimer = null;
+
+  window.openTraining = function () {
+    $("#training-panel").classList.remove("hidden");
+    refreshTraining();
+    trainingTimer = setInterval(refreshTrainingGpu, 5000);
+  };
+
+  window.closeTraining = function () {
+    $("#training-panel").classList.add("hidden");
+    if (trainingTimer) { clearInterval(trainingTimer); trainingTimer = null; }
+    if (trainingLogWatchTimer) { clearInterval(trainingLogWatchTimer); trainingLogWatchTimer = null; }
+    setTimeout(doFit, 50);
+  };
+
+  window.refreshTraining = function () {
+    refreshTrainingGpu();
+  };
+
+  async function refreshTrainingGpu() {
+    try {
+      var res = await fetch("/api/training?action=status");
+      var data = await res.json();
+      renderTrainingPanel(data);
+    } catch (e) {
+      var body = $("#training-body");
+      if (body) body.innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  }
+
+  function renderTrainingPanel(data) {
+    var body = $("#training-body");
+    if (!body) return;
+    var html = "";
+
+    // GPU utilization chart
+    if (data.gpus && data.gpus.length > 0) {
+      html += '<div class="gpu-chart-wrap">';
+      html += '<div class="gpu-chart-title">GPU Utilization (최근 5분)</div>';
+      html += '<div class="gpu-chart-bars" id="gpu-util-chart">';
+      // Use GPU 0's history for the main chart
+      var hist = data.gpus[0].util_history || [];
+      for (var i = 0; i < hist.length; i++) {
+        var val = hist[i];
+        var color = val < 60 ? "green" : val < 85 ? "orange" : "red";
+        html += '<div class="gpu-chart-bar ' + color + '" style="height:' + Math.max(val, 1) + '%"></div>';
+      }
+      // Pad to 60
+      for (var j = hist.length; j < 60; j++) {
+        html += '<div class="gpu-chart-bar green" style="height:1%"></div>';
+      }
+      html += '</div></div>';
+
+      // Live GPU cards
+      html += '<div class="gpu-live-row">';
+      data.gpus.forEach(function (gpu, idx) {
+        var vramPct = gpu.memory_total > 0 ? Math.round(gpu.memory_used / gpu.memory_total * 100) : 0;
+        var utilColor = gpu.util < 60 ? "var(--green)" : gpu.util < 85 ? "var(--orange)" : "var(--red)";
+        html += '<div class="gpu-live-card">';
+        html += '<div class="gpu-live-name">GPU ' + idx + ': ' + escHtml(gpu.name) + '</div>';
+        html += '<div class="gpu-live-stats">';
+        html += '<span style="color:' + utilColor + '">' + gpu.util + '%</span> ';
+        html += (gpu.memory_used / 1024).toFixed(1) + '/' + (gpu.memory_total / 1024).toFixed(1) + 'GB ';
+        html += gpu.temp + '\u00B0C';
+        if (gpu.power && gpu.power !== "0") html += ' ' + parseFloat(gpu.power).toFixed(0) + 'W';
+        html += '</div>';
+        html += '<div class="stat-bar-wrap" style="margin-top:4px"><div class="stat-bar ' + barClass(gpu.util) + '" style="width:' + gpu.util + '%"></div></div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div class="stat-card"><div class="stat-label">GPU</div><div class="stat-value" style="color:var(--text3)">GPU not detected</div></div>';
+    }
+
+    // Training log section (persists path)
+    html += '<div class="training-log-section">';
+    html += '<div class="gpu-chart-title">Training Log</div>';
+    html += '<div class="training-log-header">';
+    html += '<input type="text" id="training-log-path" placeholder="로그 파일 경로 입력..." value="' + escHtml(trainingLogPath) + '">';
+    html += '<button class="docker-action-btn logs" onclick="loadTrainingLog()" style="min-height:40px">불러오기</button>';
+    html += '</div>';
+    html += '<div class="training-log-content" id="training-log-content">로그 파일 경로를 입력하고 불러오기를 눌러주세요.</div>';
+    html += '<div class="training-log-controls">';
+    html += '<label><input type="checkbox" id="training-autoscroll" ' + (trainingAutoScroll ? "checked" : "") + ' onchange="trainingAutoScroll=this.checked"> 자동 스크롤</label>';
+    html += '<label><input type="checkbox" id="training-autorefresh" onchange="toggleTrainingLogWatch(this.checked)"> 자동 갱신 (3초)</label>';
+    html += '</div>';
+    html += '</div>';
+
+    body.innerHTML = html;
+
+    // Scroll chart to right
+    var chart = document.getElementById("gpu-util-chart");
+    if (chart) chart.scrollLeft = chart.scrollWidth;
+
+    // If we had a log loaded, reload it
+    if (trainingLogPath) {
+      setTimeout(loadTrainingLog, 100);
+    }
+  }
+
+  window.loadTrainingLog = async function () {
+    var pathInput = document.getElementById("training-log-path");
+    if (!pathInput) return;
+    var logPath = pathInput.value.trim();
+    if (!logPath) return;
+    trainingLogPath = logPath;
+    var el = document.getElementById("training-log-content");
+    if (!el) return;
+    el.textContent = "불러오는 중...";
+    try {
+      var res = await fetch("/api/training?action=watch&path=" + encodeURIComponent(logPath));
+      var data = await res.json();
+      if (data.error) {
+        el.textContent = data.error;
+        return;
+      }
+      el.textContent = data.content || "(empty)";
+      if (trainingAutoScroll) el.scrollTop = el.scrollHeight;
+    } catch (e) {
+      el.textContent = "불러오기 실패: " + e.message;
+    }
+  };
+
+  window.toggleTrainingLogWatch = function (enabled) {
+    if (trainingLogWatchTimer) {
+      clearInterval(trainingLogWatchTimer);
+      trainingLogWatchTimer = null;
+    }
+    if (enabled && trainingLogPath) {
+      trainingLogWatchTimer = setInterval(loadTrainingLog, 3000);
+    }
+  };
+
+  // ══════════════════════════════════════════════════
+  // Feature 2: Alert System
+  // ══════════════════════════════════════════════════
+  var alertPollTimer = null;
+  var alertBadgeCount = 0;
+
+  function startAlertPolling() {
+    alertPollTimer = setInterval(pollPendingAlerts, 10000);
+  }
+
+  async function pollPendingAlerts() {
+    try {
+      var res = await fetch("/api/alerts?action=pending");
+      var data = await res.json();
+      if (data.alerts && data.alerts.length > 0) {
+        data.alerts.forEach(function (a) {
+          showToast(a.message, a.level === "warning");
+        });
+        alertBadgeCount += data.alerts.length;
+        updateAlertBadge();
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function updateAlertBadge() {
+    var badge = document.getElementById("alert-badge");
+    if (!badge) return;
+    if (alertBadgeCount > 0) {
+      badge.textContent = alertBadgeCount > 99 ? "99+" : alertBadgeCount;
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  }
+
+  window.openAlertConfig = function () {
+    alertBadgeCount = 0;
+    updateAlertBadge();
+    $("#alert-panel").classList.remove("hidden");
+    loadAlertConfig();
+  };
+
+  window.closeAlertConfig = function () {
+    $("#alert-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+
+  async function loadAlertConfig() {
+    var body = $("#alert-body");
+    body.innerHTML = '<div class="file-loading">불러오는 중...</div>';
+    try {
+      var res = await fetch("/api/alerts?action=config");
+      var cfgData = await res.json();
+      var cfg = cfgData.config || {};
+      var th = cfg.thresholds || {};
+
+      var res2 = await fetch("/api/alerts?action=history");
+      var histData = await res2.json();
+      var history = histData.alerts || [];
+
+      var html = '';
+      // Thresholds
+      html += '<div class="alert-section">';
+      html += '<div class="alert-section-title">임계값 설정</div>';
+      var thresholds = [
+        { key: "cpu", label: "CPU", val: th.cpu || 90 },
+        { key: "memory", label: "Memory", val: th.memory || 90 },
+        { key: "disk", label: "Disk", val: th.disk || 95 },
+        { key: "gpu_util", label: "GPU Util", val: th.gpu_util || 95 },
+        { key: "gpu_temp", label: "GPU Temp", val: th.gpu_temp || 85 },
+      ];
+      thresholds.forEach(function (t) {
+        html += '<div class="alert-threshold-row">';
+        html += '<span class="alert-threshold-label">' + t.label + '</span>';
+        html += '<input type="range" class="alert-threshold-slider" id="alert-th-' + t.key + '" min="50" max="100" value="' + t.val + '" oninput="document.getElementById(\'alert-thv-' + t.key + '\').textContent=this.value+\'%\'">';
+        html += '<span class="alert-threshold-value" id="alert-thv-' + t.key + '">' + t.val + '%</span>';
+        html += '</div>';
+      });
+      html += '<div class="alert-actions">';
+      html += '<button class="primary" onclick="saveAlertThresholds()">저장</button>';
+      html += '</div>';
+      html += '</div>';
+
+      // Telegram
+      html += '<div class="alert-section">';
+      html += '<div class="alert-section-title">Telegram 알림</div>';
+      html += '<div class="alert-input-row"><label>Bot Token</label>';
+      html += '<input type="text" id="alert-tg-token" value="' + escHtml(cfg.telegram_bot_token || "") + '" placeholder="123456:ABC-DEF..." autocomplete="off"></div>';
+      html += '<div class="alert-input-row"><label>Chat ID</label>';
+      html += '<input type="text" id="alert-tg-chatid" value="' + escHtml(cfg.telegram_chat_id || "") + '" placeholder="-1001234567890" autocomplete="off"></div>';
+      html += '<div class="alert-actions">';
+      html += '<button class="primary" onclick="saveAlertTelegram()">저장</button>';
+      html += '<button onclick="testAlert()">테스트 전송</button>';
+      html += '</div>';
+      html += '</div>';
+
+      // History
+      html += '<div class="alert-section">';
+      html += '<div class="alert-section-title">알림 기록</div>';
+      if (history.length === 0) {
+        html += '<div style="color:var(--text3);font-size:13px">기록 없음</div>';
+      } else {
+        html += '<div class="alert-history-list">';
+        history.slice().reverse().forEach(function (a) {
+          var d = new Date(a.timestamp * 1000);
+          var timeStr = d.toLocaleString("ko-KR", { hour12: false });
+          html += '<div class="alert-history-item">';
+          html += '<div class="alert-history-time">' + escHtml(timeStr) + '</div>';
+          html += '<div class="alert-history-msg ' + (a.level === "info" ? "info" : "") + '">' + escHtml(a.message) + '</div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  }
+
+  window.saveAlertThresholds = async function () {
+    var keys = ["cpu", "memory", "disk", "gpu_util", "gpu_temp"];
+    var url = "/api/alerts?action=set";
+    keys.forEach(function (k) {
+      var el = document.getElementById("alert-th-" + k);
+      if (el) url += "&" + k + "=" + el.value;
+    });
+    try {
+      var res = await fetch(url);
+      var data = await res.json();
+      if (data.ok) showToast("임계값 저장 완료");
+      else showToast(data.error || "저장 실패", true);
+    } catch (e) { showToast("오류: " + e.message, true); }
+  };
+
+  window.saveAlertTelegram = async function () {
+    var token = (document.getElementById("alert-tg-token") || {}).value || "";
+    var chatId = (document.getElementById("alert-tg-chatid") || {}).value || "";
+    var url = "/api/alerts?action=set&telegram_bot_token=" + encodeURIComponent(token) + "&telegram_chat_id=" + encodeURIComponent(chatId);
+    try {
+      var res = await fetch(url);
+      var data = await res.json();
+      if (data.ok) showToast("Telegram 설정 저장 완료");
+      else showToast(data.error || "저장 실패", true);
+    } catch (e) { showToast("오류: " + e.message, true); }
+  };
+
+  window.testAlert = async function () {
+    try {
+      var res = await fetch("/api/alerts?action=test");
+      var data = await res.json();
+      if (data.ok) {
+        showToast("테스트 알림 전송됨" + (data.telegram ? " (" + data.telegram + ")" : ""));
+      } else {
+        showToast("테스트 실패", true);
+      }
+    } catch (e) { showToast("오류: " + e.message, true); }
+  };
+
+  // ══════════════════════════════════════════════════
+  // Feature 3: File Transfer (Server-to-Server)
+  // ══════════════════════════════════════════════════
+  var transferAction = "copy";
+  var transferSrc = "";
+
+  window.openTransferPopup = function (action, src) {
+    transferAction = action;
+    transferSrc = src;
+    document.getElementById("transfer-title").textContent = (action === "copy" ? "복사" : "이동") + " 대상 선택";
+    document.getElementById("transfer-dst").value = "";
+    // Load servers for remote option
+    fetch("/api/ssh-servers?action=list")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var select = document.getElementById("transfer-server");
+        select.innerHTML = '<option value="">로컬</option>';
+        if (data.servers) {
+          data.servers.forEach(function (s) {
+            select.innerHTML += '<option value="' + escHtml(s.name) + '">' + escHtml(s.name) + ' (' + escHtml(s.host) + ')</option>';
+          });
+        }
+      })
+      .catch(function () {});
+    document.getElementById("transfer-popup").classList.remove("hidden");
+  };
+
+  window.closeTransferPopup = function () {
+    document.getElementById("transfer-popup").classList.add("hidden");
+  };
+
+  window.executeTransfer = async function () {
+    var dst = (document.getElementById("transfer-dst") || {}).value || "";
+    var server = (document.getElementById("transfer-server") || {}).value || "";
+    if (!dst) { showToast("대상 경로를 입력하세요", true); return; }
+    var url = "/api/transfer?action=" + transferAction + "&src=" + encodeURIComponent(transferSrc) + "&dst=" + encodeURIComponent(dst);
+    if (server) url += "&server=" + encodeURIComponent(server);
+    try {
+      showToast("전송 시작...");
+      var res = await fetch(url);
+      var data = await res.json();
+      if (data.ok) {
+        showToast("전송 " + (data.transfer_id ? "시작됨 (ID: " + data.transfer_id + ")" : "완료"));
+        closeTransferPopup();
+      } else {
+        showToast(data.error || "전송 실패", true);
+      }
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+
+  // Add context menu to file items (long press)
+  var contextMenuTimeout = null;
+  var contextMenuEl = null;
+
+  function addFileContextMenu(div, entry) {
+    var touchStart = null;
+    div.addEventListener("touchstart", function (e) {
+      touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      contextMenuTimeout = setTimeout(function () {
+        showFileContextMenu(touchStart.x, touchStart.y, entry);
+      }, 600);
+    }, { passive: true });
+    div.addEventListener("touchmove", function () {
+      if (contextMenuTimeout) { clearTimeout(contextMenuTimeout); contextMenuTimeout = null; }
+    }, { passive: true });
+    div.addEventListener("touchend", function () {
+      if (contextMenuTimeout) { clearTimeout(contextMenuTimeout); contextMenuTimeout = null; }
+    }, { passive: true });
+  }
+
+  function showFileContextMenu(x, y, entry) {
+    closeFileContextMenu();
+    var menu = document.createElement("div");
+    menu.className = "file-context-menu";
+    menu.style.left = Math.min(x, window.innerWidth - 180) + "px";
+    menu.style.top = Math.min(y, window.innerHeight - 160) + "px";
+
+    var copyBtn = document.createElement("button");
+    copyBtn.textContent = "복사...";
+    copyBtn.onclick = function () { closeFileContextMenu(); openTransferPopup("copy", entry.path); };
+    menu.appendChild(copyBtn);
+
+    var moveBtn = document.createElement("button");
+    moveBtn.textContent = "이동...";
+    moveBtn.onclick = function () { closeFileContextMenu(); openTransferPopup("move", entry.path); };
+    menu.appendChild(moveBtn);
+
+    if (!entry.is_dir) {
+      var dlBtn = document.createElement("button");
+      dlBtn.textContent = "다운로드";
+      dlBtn.onclick = function () { closeFileContextMenu(); downloadFile(entry.path); };
+      menu.appendChild(dlBtn);
+    }
+
+    document.body.appendChild(menu);
+    contextMenuEl = menu;
+
+    setTimeout(function () {
+      document.addEventListener("click", closeFileContextMenu, { once: true });
+    }, 100);
+  }
+
+  function closeFileContextMenu() {
+    if (contextMenuEl) { contextMenuEl.remove(); contextMenuEl = null; }
+  }
+
+  // Patch renderFileList to add context menu
+  var _origRenderFileList = renderFileList;
+  renderFileList = function (data) {
+    _origRenderFileList(data);
+    var items = $$("#file-list .fitem");
+    items.forEach(function (div, idx) {
+      if (idx < data.entries.length) {
+        addFileContextMenu(div, data.entries[idx]);
+      }
+    });
+  };
+
+  // ══════════════════════════════════════════════════
+  // Feature 4: Terminal Session Sharing
+  // ══════════════════════════════════════════════════
+  var shareActive = false;
+
+  window.toggleShare = function () {
+    document.getElementById("share-popup").classList.remove("hidden");
+    refreshShareStatus();
+  };
+
+  window.closeSharePopup = function () {
+    document.getElementById("share-popup").classList.add("hidden");
+  };
+
+  async function refreshShareStatus() {
+    try {
+      var res = await fetch("/api/share?action=status");
+      var data = await res.json();
+      shareActive = data.active;
+      var statusText = document.getElementById("share-status-text");
+      var urlInput = document.getElementById("share-url-input");
+      var toggleBtn = document.getElementById("share-toggle-btn");
+      var shareBtn = document.getElementById("btn-share");
+
+      if (data.active && data.token) {
+        var shareUrl = location.origin + "?share=" + data.token;
+        statusText.textContent = "공유 활성 중 (뷰어: " + (data.viewers || 0) + "명)";
+        statusText.style.color = "var(--green)";
+        urlInput.value = shareUrl;
+        urlInput.style.display = "";
+        toggleBtn.textContent = "공유 중지";
+        toggleBtn.className = "sf-cancel-btn";
+        if (shareBtn) shareBtn.classList.add("sharing");
+      } else {
+        statusText.textContent = "공유가 비활성 상태입니다. 시작하면 읽기 전용 URL이 생성됩니다.";
+        statusText.style.color = "var(--text2)";
+        urlInput.style.display = "none";
+        toggleBtn.textContent = "공유 시작";
+        toggleBtn.className = "sf-save-btn";
+        if (shareBtn) shareBtn.classList.remove("sharing");
+      }
+    } catch (e) {
+      showToast("공유 상태 확인 실패", true);
+    }
+  }
+
+  window.toggleShareState = async function () {
+    var action = shareActive ? "stop" : "start";
+    try {
+      var res = await fetch("/api/share?action=" + action);
+      var data = await res.json();
+      if (data.ok) {
+        showToast(action === "start" ? "공유 시작됨" : "공유 중지됨");
+        refreshShareStatus();
+      } else {
+        showToast("공유 설정 실패", true);
+      }
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+
+  // ══════════════════════════════════════════════════
+  // Feature 5: Command Snippet Library
+  // ══════════════════════════════════════════════════
+  var allSnippets = [];
+  var snippetCategory = "all";
+
+  window.openSnippets = function () {
+    $("#snippets-panel").classList.remove("hidden");
+    fetchSnippets();
+  };
+
+  window.closeSnippets = function () {
+    $("#snippets-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+
+  async function fetchSnippets() {
+    try {
+      var res = await fetch("/api/snippets?action=list");
+      var data = await res.json();
+      allSnippets = data.snippets || [];
+      renderSnippetTabs();
+      renderSnippets();
+    } catch (e) {
+      $("#snippets-body").innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  }
+
+  function renderSnippetTabs() {
+    var tabs = document.getElementById("snippet-tabs");
+    if (!tabs) return;
+    var categories = ["all"];
+    var catSet = {};
+    allSnippets.forEach(function (s) {
+      if (s.category && !catSet[s.category]) {
+        catSet[s.category] = true;
+        categories.push(s.category);
+      }
+    });
+    var labels = { all: "전체", system: "System", git: "Git", docker: "Docker", ml: "ML", claude: "Claude", custom: "Custom" };
+    var html = "";
+    categories.forEach(function (cat) {
+      html += '<button class="snippet-tab ' + (snippetCategory === cat ? "active" : "") + '" onclick="switchSnippetCategory(\'' + cat + '\')">' + (labels[cat] || cat) + '</button>';
+    });
+    tabs.innerHTML = html;
+  }
+
+  window.switchSnippetCategory = function (cat) {
+    snippetCategory = cat;
+    renderSnippetTabs();
+    renderSnippets();
+  };
+
+  window.filterSnippets = function () {
+    renderSnippets();
+  };
+
+  function renderSnippets() {
+    var body = $("#snippets-body");
+    var searchQ = ((document.getElementById("snippet-search") || {}).value || "").toLowerCase();
+    var filtered = allSnippets.filter(function (s) {
+      var matchCat = snippetCategory === "all" || s.category === snippetCategory;
+      var matchSearch = !searchQ || s.name.toLowerCase().indexOf(searchQ) >= 0 || s.command.toLowerCase().indexOf(searchQ) >= 0 || (s.description || "").toLowerCase().indexOf(searchQ) >= 0;
+      return matchCat && matchSearch;
+    });
+
+    if (filtered.length === 0) {
+      body.innerHTML = '<div class="file-empty">스니펫 없음</div>';
+      return;
+    }
+
+    var html = '<div class="snippet-list">';
+    filtered.forEach(function (s) {
+      html += '<div class="snippet-item" onclick="runSnippet(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">';
+      html += '<div class="snippet-item-top">';
+      html += '<span class="snippet-name">' + escHtml(s.name) + '</span>';
+      html += '<span class="snippet-category ' + escHtml(s.category || "custom") + '">' + escHtml(s.category || "custom") + '</span>';
+      html += '</div>';
+      html += '<div class="snippet-cmd">' + escHtml(s.command) + '</div>';
+      if (s.description) html += '<div class="snippet-desc">' + escHtml(s.description) + '</div>';
+      html += '<button class="snippet-del-btn" onclick="event.stopPropagation();deleteSnippet(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">';
+      html += '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+      html += '</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  }
+
+  window.runSnippet = function (name) {
+    var snippet = allSnippets.find(function (s) { return s.name === name; });
+    if (!snippet) return;
+    closeSnippets();
+    sendWs(snippet.command + "\n");
+    showToast(snippet.name + " 실행");
+  };
+
+  window.addSnippet = function () {
+    var name = prompt("스니펫 이름:");
+    if (!name || !name.trim()) return;
+    var command = prompt("명령어:");
+    if (!command) return;
+    var category = prompt("카테고리 (system/git/docker/ml/claude/custom):", "custom");
+    if (!category) category = "custom";
+    var description = prompt("설명 (선택):", "");
+
+    var url = "/api/snippets?action=save" +
+      "&name=" + encodeURIComponent(name.trim()) +
+      "&command=" + encodeURIComponent(command) +
+      "&category=" + encodeURIComponent(category) +
+      "&description=" + encodeURIComponent(description || "");
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) { showToast("스니펫 추가 완료"); fetchSnippets(); }
+        else showToast(data.error || "추가 실패", true);
+      })
+      .catch(function (e) { showToast("오류: " + e.message, true); });
+  };
+
+  window.deleteSnippet = function (name) {
+    if (!confirm("'" + name + "' 스니펫을 삭제하시겠습니까?")) return;
+    fetch("/api/snippets?action=delete&name=" + encodeURIComponent(name))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) { showToast("삭제 완료"); fetchSnippets(); }
+        else showToast(data.error || "삭제 실패", true);
+      })
+      .catch(function (e) { showToast("오류: " + e.message, true); });
+  };
+
   // ── Init ───────────────────────────────────────
   initTerminal();
   setupInputBar();
   connect();
+  startAlertPolling();
 
   // No service worker registration -- causes caching issues
 
