@@ -416,22 +416,22 @@ button[type="submit"] .spinner {
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner"></span>로그인 중...';
 
-    // Determine target URL
-    let baseUrl = '';
+    // Remote server: redirect to that server's login page
     if (remoteAddr) {
-      // Normalize: add protocol if missing
       let addr = remoteAddr;
       if (!/^https?:\/\//.test(addr)) {
         addr = window.location.protocol + '//' + addr;
       }
-      // Remove trailing slash
       addr = addr.replace(/\/+$/, '');
-      baseUrl = addr;
+      addRecent(remoteAddr);
+      submitBtn.innerHTML = '이동 중...';
+      window.location.href = addr + '/login';
+      return;
     }
 
+    // Current server: authenticate via API
     try {
-      const loginUrl = baseUrl + '/api/login';
-      const res = await fetch(loginUrl, {
+      const res = await fetch('/api/login', {
         method: 'GET',
         headers: {
           'Authorization': 'Basic ' + btoa(username + ':' + pw)
@@ -440,25 +440,16 @@ button[type="submit"] .spinner {
       const data = await res.json();
 
       if (data.ok) {
-        // Save to recent servers if remote
-        if (remoteAddr) {
-          addRecent(remoteAddr);
-        }
         submitBtn.innerHTML = '로그인 성공';
         submitBtn.style.background = '#238636';
-        if (remoteAddr) {
-          // Redirect to the remote server's main page
-          window.location.href = baseUrl + '/';
-        } else {
-          window.location.href = '/';
-        }
+        window.location.href = '/';
       } else {
         showError(data.error || '사용자 이름 또는 비밀번호가 올바르지 않습니다');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '로그인';
       }
     } catch (err) {
-      showError('연결 실패 -- 서버 주소와 상태를 확인하세요');
+      showError('연결 실패 -- 서버 상태를 확인하세요');
       submitBtn.disabled = false;
       submitBtn.innerHTML = '로그인';
     }
