@@ -154,6 +154,111 @@ button[type="submit"] .spinner {
   to { transform: rotate(360deg); }
 }
 
+.server-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8b949e;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 8px 0;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: color 0.2s;
+}
+.server-toggle:hover { color: #e6edf3; }
+.server-toggle .chevron {
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+.server-toggle.open .chevron { transform: rotate(180deg); }
+.server-toggle.open { color: #58a6ff; }
+
+.server-field-hidden {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  opacity: 0;
+}
+.server-field-visible {
+  max-height: 100px;
+  opacity: 1;
+}
+
+.server-hint {
+  font-size: 11px;
+  color: #484f58;
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
+.recent-servers {
+  margin-bottom: 16px;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.recent-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b949e;
+  padding: 8px 12px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.recent-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  gap: 10px;
+  border-top: 1px solid #21262d;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.recent-item:hover { background: #161b22; }
+.recent-item:active { background: #21262d; }
+.recent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3fb950;
+  flex-shrink: 0;
+}
+.recent-addr {
+  flex: 1;
+  font-size: 13px;
+  color: #e6edf3;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-select {
+  font-size: 12px;
+  color: #58a6ff;
+  background: none;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.recent-select:hover { background: rgba(88, 166, 255, 0.1); }
+.recent-remove {
+  background: none;
+  border: none;
+  color: #484f58;
+  cursor: pointer;
+  padding: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.recent-remove:hover { color: #f85149; }
+
 .footer {
   color: #30363d;
   font-size: 11px;
@@ -176,6 +281,21 @@ button[type="submit"] .spinner {
   <div class="subtitle">서버에 로그인하세요</div>
   <form id="form">
     <div class="field">
+      <div class="server-toggle" id="server-toggle" onclick="toggleServerField()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
+        <span>서버 주소 (선택)</span>
+        <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div id="server-field" class="server-field-hidden">
+        <input type="text" id="server-addr" placeholder="192.168.0.100:8765" autocomplete="off" autocapitalize="off">
+        <div class="server-hint">비워두면 현재 서버에 접속합니다</div>
+      </div>
+    </div>
+    <div id="recent-servers" class="recent-servers" style="display:none">
+      <div class="recent-label">최근 서버</div>
+      <div id="recent-list"></div>
+    </div>
+    <div class="field">
       <label for="username">사용자 이름</label>
       <input type="text" id="username" placeholder="username" autofocus autocomplete="username">
     </div>
@@ -193,21 +313,94 @@ button[type="submit"] .spinner {
   const form = document.getElementById('form');
   const errEl = document.getElementById('err');
   const submitBtn = document.getElementById('submit-btn');
+  const serverAddr = document.getElementById('server-addr');
+  const STORAGE_KEY = 'servit_recent_servers';
+  const MAX_RECENT = 5;
 
   function showError(msg) {
     errEl.textContent = msg;
     errEl.style.display = 'block';
     errEl.classList.remove('shake');
-    void errEl.offsetWidth; // reflow to restart animation
+    void errEl.offsetWidth;
     errEl.classList.add('shake');
   }
 
+  // --- Recent servers ---
+  function getRecent() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+    catch { return []; }
+  }
+  function saveRecent(list) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, MAX_RECENT)));
+  }
+  function addRecent(addr) {
+    if (!addr) return;
+    let list = getRecent().filter(s => s !== addr);
+    list.unshift(addr);
+    saveRecent(list);
+    renderRecent();
+  }
+  function removeRecent(addr) {
+    saveRecent(getRecent().filter(s => s !== addr));
+    renderRecent();
+  }
+  function renderRecent() {
+    const list = getRecent();
+    const container = document.getElementById('recent-servers');
+    const listEl = document.getElementById('recent-list');
+    if (!list.length) { container.style.display = 'none'; return; }
+    container.style.display = 'block';
+    listEl.innerHTML = list.map(addr =>
+      '<div class="recent-item">' +
+        '<span class="recent-dot"></span>' +
+        '<span class="recent-addr">' + addr.replace(/</g, '&lt;') + '</span>' +
+        '<button type="button" class="recent-select" data-addr="' + addr.replace(/"/g, '&quot;') + '">선택</button>' +
+        '<button type="button" class="recent-remove" data-addr="' + addr.replace(/"/g, '&quot;') + '">&times;</button>' +
+      '</div>'
+    ).join('');
+    listEl.querySelectorAll('.recent-select').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        serverAddr.value = this.dataset.addr;
+        // open the server field if not already
+        var sf = document.getElementById('server-field');
+        var st = document.getElementById('server-toggle');
+        sf.classList.add('server-field-visible');
+        sf.classList.remove('server-field-hidden');
+        st.classList.add('open');
+      });
+    });
+    listEl.querySelectorAll('.recent-remove').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        removeRecent(this.dataset.addr);
+      });
+    });
+  }
+
+  // --- Server field toggle ---
+  window.toggleServerField = function() {
+    var sf = document.getElementById('server-field');
+    var st = document.getElementById('server-toggle');
+    if (sf.classList.contains('server-field-visible')) {
+      sf.classList.remove('server-field-visible');
+      sf.classList.add('server-field-hidden');
+      st.classList.remove('open');
+    } else {
+      sf.classList.add('server-field-visible');
+      sf.classList.remove('server-field-hidden');
+      st.classList.add('open');
+    }
+  };
+
+  // --- Login ---
   form.onsubmit = async (e) => {
     e.preventDefault();
     errEl.style.display = 'none';
 
     const username = document.getElementById('username').value.trim();
     const pw = document.getElementById('pw').value;
+    const remoteAddr = serverAddr.value.trim();
 
     if (!username) {
       showError('사용자 이름을 입력하세요');
@@ -223,8 +416,22 @@ button[type="submit"] .spinner {
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner"></span>로그인 중...';
 
+    // Determine target URL
+    let baseUrl = '';
+    if (remoteAddr) {
+      // Normalize: add protocol if missing
+      let addr = remoteAddr;
+      if (!/^https?:\/\//.test(addr)) {
+        addr = window.location.protocol + '//' + addr;
+      }
+      // Remove trailing slash
+      addr = addr.replace(/\/+$/, '');
+      baseUrl = addr;
+    }
+
     try {
-      const res = await fetch('/api/login', {
+      const loginUrl = baseUrl + '/api/login';
+      const res = await fetch(loginUrl, {
         method: 'GET',
         headers: {
           'Authorization': 'Basic ' + btoa(username + ':' + pw)
@@ -233,20 +440,32 @@ button[type="submit"] .spinner {
       const data = await res.json();
 
       if (data.ok) {
+        // Save to recent servers if remote
+        if (remoteAddr) {
+          addRecent(remoteAddr);
+        }
         submitBtn.innerHTML = '로그인 성공';
         submitBtn.style.background = '#238636';
-        window.location.href = '/';
+        if (remoteAddr) {
+          // Redirect to the remote server's main page
+          window.location.href = baseUrl + '/';
+        } else {
+          window.location.href = '/';
+        }
       } else {
         showError(data.error || '사용자 이름 또는 비밀번호가 올바르지 않습니다');
         submitBtn.disabled = false;
         submitBtn.innerHTML = '로그인';
       }
     } catch (err) {
-      showError('연결 실패 -- 서버 상태를 확인하세요');
+      showError('연결 실패 -- 서버 주소와 상태를 확인하세요');
       submitBtn.disabled = false;
       submitBtn.innerHTML = '로그인';
     }
   };
+
+  // Init
+  renderRecent();
 })();
 </script>
 </body>
