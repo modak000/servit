@@ -669,8 +669,17 @@ def handle_api(path, request, session_info):
         if ext == ".docx":
             return parse_docx(file_path, size)
 
+        # Image files — return as viewable image
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"}
+        if ext in image_exts:
+            return make_json({
+                "path": file_path,
+                "content": f"[Image file -- {ext} / {size:,} bytes]",
+                "language": "text", "size": size, "binary": True, "image": True,
+            })
+
         # Binary check
-        binary_exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".pdf",
+        binary_exts = {".pdf",
                        ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z",
                        ".so", ".o", ".pyc", ".class", ".jar", ".ttf", ".woff2",
                        ".mp3", ".mp4", ".wav", ".avi", ".mkv", ".pptx"}
@@ -1836,6 +1845,182 @@ def handle_api(path, request, session_info):
             except Exception as e:
                 return make_json({"ok": False, "error": str(e)})
         return make_json({"error": "Unknown action"})
+
+    elif path.startswith("/api/image"):
+        file_path = params.get("path", [""])[0]
+        if not file_path or not os.path.isfile(file_path):
+            return make_response(404, b"Not found")
+        allowed, resolved = validate_path_access(file_path, user_root)
+        if not allowed:
+            return make_response(403, b"Access denied")
+        file_path = resolved
+        ext = Path(file_path).suffix.lower()
+        ct_map = {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
+            ".ico": "image/x-icon", ".bmp": "image/bmp",
+        }
+        content_type = ct_map.get(ext)
+        if not content_type:
+            return make_response(400, b"Not an image")
+        size = os.path.getsize(file_path)
+        if size > 20_000_000:  # 20MB limit
+            return make_response(413, b"Image too large")
+        try:
+            with open(file_path, "rb") as f:
+                data = f.read()
+            return make_response(200, data, content_type)
+        except Exception:
+            return make_response(500, b"Read failed")
+
+    elif path.startswith("/api/sysinfo"):
+        info = {}
+        try:
+            uname = os.uname()
+            info["hostname"] = uname.nodename
+            info["kernel"] = uname.release
+            info["arch"] = uname.machine
+        except Exception:
+            info["hostname"] = "unknown"
+            info["kernel"] = "unknown"
+            info["arch"] = "unknown"
+        # OS name
+        try:
+            with open("/etc/os-release", "r") as f:
+                for line in f:
+                    if line.startswith("PRETTY_NAME="):
+                        info["os"] = line.split("=", 1)[1].strip().strip('"')
+                        break
+        except Exception:
+            info["os"] = "Linux"
+        # CPU
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                for line in f:
+                    if line.startswith("model name"):
+                        info["cpu_model"] = line.split(":", 1)[1].strip()
+                        break
+            info["cpu_count"] = os.cpu_count() or 0
+        except Exception:
+            info["cpu_model"] = "unknown"
+            info["cpu_count"] = os.cpu_count() or 0
+        # RAM
+        try:
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    if line.startswith("MemTotal"):
+                        kb = int(line.split()[1])
+                        info["ram_total"] = kb * 1024
+                        break
+        except Exception:
+            info["ram_total"] = 0
+        # Disk partitions
+        try:
+            result = subprocess.run(["df", "-h", "--output=source,fstype,size,used,avail,pcent,target"],
+                                    capture_output=True, text=True, timeout=5)
+            parts = []
+            for line in result.stdout.strip().split("\n")[1:]:
+                cols = line.split()
+                if len(cols) >= 7 and not cols[0].startswith("tmpfs") and not cols[0].startswith("devtmpfs"):
+                    parts.append({
+                        "device": cols[0], "fstype": cols[1], "size": cols[2],
+                        "used": cols[3], "avail": cols[4], "pcent": cols[5], "mount": cols[6],
+                    })
+            info["disks"] = parts
+        except Exception:
+            info["disks"] = []
+        # GPU
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5)
+            gpus = []
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    p = [x.strip() for x in line.split(",")]
+                    gpus.append({"name": p[0], "driver": p[1] if len(p) > 1 else "", "vram": p[2] if len(p) > 2 else ""})
+            info["gpus"] = gpus
+        except Exception:
+            info["gpus"] = []
+        # Python version
+        info["python"] = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        # Docker version
+        try:
+            result = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=3)
+            info["docker"] = result.stdout.strip() if result.returncode == 0 else "not installed"
+        except Exception:
+            info["docker"] = "not installed"
+        # Uptime
+        try:
+            with open("/proc/uptime", "r") as f:
+                secs = float(f.read().split()[0])
+            d = int(secs // 86400)
+            h = int((secs % 86400) // 3600)
+            m = int((secs % 3600) // 60)
+            info["uptime"] = f"{d}d {h}h {m}m" if d > 0 else f"{h}h {m}m"
+        except Exception:
+            info["uptime"] = "unknown"
+        # Network interfaces
+        try:
+            result = subprocess.run(["ip", "-brief", "addr"], capture_output=True, text=True, timeout=3)
+            ifaces = []
+            for line in result.stdout.strip().split("\n"):
+                parts_l = line.split()
+                if len(parts_l) >= 3 and parts_l[0] != "lo":
+                    ifaces.append({"name": parts_l[0], "state": parts_l[1], "addr": " ".join(parts_l[2:])})
+            info["network"] = ifaces
+        except Exception:
+            info["network"] = []
+        return make_json(info)
+
+    elif path.startswith("/api/history"):
+        history_path = os.path.join(user_root, ".bash_history")
+        count = int(params.get("count", ["50"])[0])
+        if count > 200:
+            count = 200
+        search_q = params.get("q", [""])[0].lower()
+        try:
+            if not os.path.isfile(history_path):
+                return make_json({"commands": []})
+            with open(history_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            # Deduplicate while preserving order (most recent first)
+            seen = set()
+            commands = []
+            for line in reversed(lines):
+                cmd = line.strip()
+                if not cmd or cmd in seen:
+                    continue
+                if search_q and search_q not in cmd.lower():
+                    continue
+                seen.add(cmd)
+                commands.append(cmd)
+                if len(commands) >= count:
+                    break
+            return make_json({"commands": commands})
+        except Exception as e:
+            return make_json({"commands": [], "error": str(e)})
+
+    elif path.startswith("/api/quickcmd"):
+        cmd_name = params.get("name", [""])[0]
+        quick_commands = {
+            "python_procs": "ps aux | grep python | grep -v grep",
+            "gpu_procs": "nvidia-smi --query-compute-apps=pid,name,used_memory --format=csv",
+            "ports": "ss -tlnp",
+            "big_files": "du -sh * 2>/dev/null | sort -rh | head -20",
+            "recent_files": "find . -type f -mmin -60 2>/dev/null | head -20",
+            "log_errors": "journalctl -p err --no-pager -n 20 2>/dev/null || grep -r 'ERROR\\|Error' /var/log/syslog 2>/dev/null | tail -20",
+        }
+        if cmd_name in quick_commands:
+            return make_json({"command": quick_commands[cmd_name], "name": cmd_name})
+        return make_json({"commands": [
+            {"name": "python_procs", "label": "Python \ud504\ub85c\uc138\uc2a4", "icon": "python"},
+            {"name": "gpu_procs", "label": "GPU \ud504\ub85c\uc138\uc2a4", "icon": "gpu"},
+            {"name": "ports", "label": "\ud3ec\ud2b8 \uc0ac\uc6a9", "icon": "port"},
+            {"name": "big_files", "label": "\ud070 \ud30c\uc77c", "icon": "disk"},
+            {"name": "recent_files", "label": "\ucd5c\uadfc \uc218\uc815", "icon": "recent"},
+            {"name": "log_errors", "label": "\ub85c\uadf8 \uc5d0\ub7ec", "icon": "error"},
+        ]})
 
     return make_response(404, b"Unknown API")
 

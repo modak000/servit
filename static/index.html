@@ -406,6 +406,50 @@
     </div>
   </div>
 
+  <!-- System Info panel -->
+  <div id="sysinfo-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">System Info</span>
+        <span class="panel-subtitle">서버 정보</span>
+      </div>
+      <button class="icon-btn" onclick="refreshSysinfo()" aria-label="Refresh">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="icon-btn" onclick="closeSysinfo()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="sysinfo-body"><div class="file-empty">불러오는 중...</div></div>
+  </div>
+
+  <!-- Quick Commands panel -->
+  <div id="quickcmd-panel" class="hidden">
+    <div class="panel-header">
+      <div class="panel-title-row">
+        <span class="panel-title">Quick Commands</span>
+        <span class="panel-subtitle">빠른 진단</span>
+      </div>
+      <button class="icon-btn" onclick="closeQuickCmd()" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="quickcmd-body"><div class="file-empty">불러오는 중...</div></div>
+  </div>
+
+  <!-- History popup -->
+  <div id="history-popup" class="hidden">
+    <div class="overlay-backdrop" onclick="closeHistory()"></div>
+    <div class="popup-card history-card">
+      <div class="pp-title">명령어 히스토리</div>
+      <div class="history-search-wrap">
+        <input type="text" id="history-search" class="sf-input" placeholder="검색..." autocomplete="off" oninput="filterHistory()">
+      </div>
+      <div id="history-list"></div>
+      <button class="pp-close" onclick="closeHistory()">닫기</button>
+    </div>
+  </div>
+
   <!-- Toast notifications -->
   <div id="toast-container"></div>
 
@@ -471,6 +515,18 @@
         <button onclick="openServers(); closeMoreMenu()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
           SSH 서버
+        </button>
+        <button onclick="openQuickCmd(); closeMoreMenu()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          빠른 진단
+        </button>
+        <button onclick="openSysinfo(); closeMoreMenu()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          서버 정보
+        </button>
+        <button onclick="openHistory(); closeMoreMenu()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          명령어 히스토리
         </button>
       </div>
       <button class="icon-btn" id="btn-share" onclick="toggleShare()" aria-label="Share" title="터미널 공유">

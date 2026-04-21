@@ -231,6 +231,13 @@
         return;
       }
 
+      // Image files — render as image
+      if (data.image) {
+        infoEl.textContent = "Image \u00B7 " + fmtSize(data.size);
+        renderImage(data);
+        return;
+      }
+
       // Show edit button for non-binary, non-truncated text files
       editingPath = path;
       if (!data.binary && !data.truncated) {
@@ -2763,6 +2770,203 @@
         else showToast(data.error || "삭제 실패", true);
       })
       .catch(function (e) { showToast("오류: " + e.message, true); });
+  };
+
+  // ══════════════════════════════════════════════════
+  // Feature: Image Viewer (in file viewer)
+  // ══════════════════════════════════════════════════
+  function renderImage(data) {
+    var body = $("#viewer-body");
+    var imgUrl = "/api/image?path=" + encodeURIComponent(data.path);
+    body.innerHTML = '<div class="image-viewer-wrap"><img src="' + imgUrl + '" class="image-viewer-img" alt="' + escHtml(data.path.split("/").pop()) + '" onclick="this.classList.toggle(\'zoomed\')"></div>';
+    $("#btn-download").style.display = "flex";
+    editingPath = data.path;
+  }
+
+  // ══════════════════════════════════════════════════
+  // Feature: System Info
+  // ══════════════════════════════════════════════════
+  window.openSysinfo = function () {
+    $("#sysinfo-panel").classList.remove("hidden");
+    fetchSysinfo();
+  };
+
+  window.closeSysinfo = function () {
+    $("#sysinfo-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+
+  window.refreshSysinfo = function () {
+    fetchSysinfo();
+  };
+
+  async function fetchSysinfo() {
+    var body = $("#sysinfo-body");
+    body.innerHTML = '<div class="file-empty">불러오는 중...</div>';
+    try {
+      var res = await fetch("/api/sysinfo");
+      var info = await res.json();
+      var html = '<div class="sysinfo-grid">';
+
+      html += '<div class="sysinfo-card"><div class="sysinfo-card-title">OS</div>';
+      html += '<div class="sysinfo-row"><span>이름</span><span>' + escHtml(info.os || "Linux") + '</span></div>';
+      html += '<div class="sysinfo-row"><span>커널</span><span>' + escHtml(info.kernel || "") + '</span></div>';
+      html += '<div class="sysinfo-row"><span>호스트명</span><span>' + escHtml(info.hostname || "") + '</span></div>';
+      html += '<div class="sysinfo-row"><span>아키텍처</span><span>' + escHtml(info.arch || "") + '</span></div>';
+      html += '<div class="sysinfo-row"><span>업타임</span><span>' + escHtml(info.uptime || "") + '</span></div>';
+      html += '</div>';
+
+      html += '<div class="sysinfo-card"><div class="sysinfo-card-title">CPU</div>';
+      html += '<div class="sysinfo-row"><span>모델</span><span>' + escHtml(info.cpu_model || "unknown") + '</span></div>';
+      html += '<div class="sysinfo-row"><span>코어 수</span><span>' + (info.cpu_count || 0) + '</span></div>';
+      html += '</div>';
+
+      html += '<div class="sysinfo-card"><div class="sysinfo-card-title">메모리</div>';
+      html += '<div class="sysinfo-row"><span>총 RAM</span><span>' + fmtBytes(info.ram_total || 0) + '</span></div>';
+      html += '</div>';
+
+      if (info.gpus && info.gpus.length > 0) {
+        html += '<div class="sysinfo-card"><div class="sysinfo-card-title">GPU</div>';
+        info.gpus.forEach(function (gpu, i) {
+          html += '<div class="sysinfo-row"><span>GPU ' + i + '</span><span>' + escHtml(gpu.name) + '</span></div>';
+          if (gpu.vram) html += '<div class="sysinfo-row"><span>VRAM</span><span>' + escHtml(gpu.vram) + '</span></div>';
+          if (gpu.driver) html += '<div class="sysinfo-row"><span>드라이버</span><span>' + escHtml(gpu.driver) + '</span></div>';
+        });
+        html += '</div>';
+      }
+
+      if (info.disks && info.disks.length > 0) {
+        html += '<div class="sysinfo-card"><div class="sysinfo-card-title">디스크</div>';
+        info.disks.forEach(function (d) {
+          html += '<div class="sysinfo-row"><span>' + escHtml(d.mount) + '</span><span>' + escHtml(d.used) + ' / ' + escHtml(d.size) + ' (' + escHtml(d.pcent) + ')</span></div>';
+        });
+        html += '</div>';
+      }
+
+      if (info.network && info.network.length > 0) {
+        html += '<div class="sysinfo-card"><div class="sysinfo-card-title">네트워크</div>';
+        info.network.forEach(function (n) {
+          html += '<div class="sysinfo-row"><span>' + escHtml(n.name) + ' <small style="color:var(--text3)">' + escHtml(n.state) + '</small></span><span>' + escHtml(n.addr) + '</span></div>';
+        });
+        html += '</div>';
+      }
+
+      html += '<div class="sysinfo-card"><div class="sysinfo-card-title">소프트웨어</div>';
+      html += '<div class="sysinfo-row"><span>Python</span><span>' + escHtml(info.python || "") + '</span></div>';
+      html += '<div class="sysinfo-row"><span>Docker</span><span>' + escHtml(info.docker || "not installed") + '</span></div>';
+      html += '</div>';
+
+      html += '</div>';
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="file-empty">불러오기 실패: ' + escHtml(e.message) + '</div>';
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  // Feature: Quick Commands
+  // ══════════════════════════════════════════════════
+  window.openQuickCmd = function () {
+    $("#quickcmd-panel").classList.remove("hidden");
+    renderQuickCmds();
+  };
+
+  window.closeQuickCmd = function () {
+    $("#quickcmd-panel").classList.add("hidden");
+    setTimeout(doFit, 50);
+  };
+
+  function renderQuickCmds() {
+    var body = $("#quickcmd-body");
+    var cmds = [
+      { name: "python_procs", label: "Python 프로세스", desc: "실행 중인 Python 프로세스 확인", icon: "\uD83D\uDC0D" },
+      { name: "gpu_procs", label: "GPU 프로세스", desc: "GPU 사용 중인 프로세스 목록", icon: "\uD83C\uDFAE" },
+      { name: "ports", label: "포트 사용", desc: "열린 포트 및 리스닝 서비스", icon: "\uD83D\uDD0C" },
+      { name: "big_files", label: "디스크 큰 파일", desc: "현재 디렉토리에서 큰 파일 순", icon: "\uD83D\uDCBE" },
+      { name: "recent_files", label: "최근 수정 파일", desc: "최근 1시간 내 수정된 파일", icon: "\uD83D\uDD52" },
+      { name: "log_errors", label: "로그 에러", desc: "시스템 로그에서 에러 검색", icon: "\u26A0\uFE0F" },
+    ];
+    var html = '<div class="quickcmd-grid">';
+    cmds.forEach(function (cmd) {
+      html += '<button class="quickcmd-btn" onclick="runQuickCmd(\'' + cmd.name + '\')">';
+      html += '<span class="quickcmd-icon">' + cmd.icon + '</span>';
+      html += '<span class="quickcmd-label">' + escHtml(cmd.label) + '</span>';
+      html += '<span class="quickcmd-desc">' + escHtml(cmd.desc) + '</span>';
+      html += '</button>';
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  }
+
+  window.runQuickCmd = async function (name) {
+    try {
+      var res = await fetch("/api/quickcmd?name=" + encodeURIComponent(name));
+      var data = await res.json();
+      if (data.command) {
+        closeQuickCmd();
+        sendWs(data.command + "\n");
+        showToast("실행: " + name);
+      }
+    } catch (e) {
+      showToast("오류: " + e.message, true);
+    }
+  };
+
+  // ══════════════════════════════════════════════════
+  // Feature: Terminal History Search
+  // ══════════════════════════════════════════════════
+  var historyCommands = [];
+
+  window.openHistory = async function () {
+    $("#history-popup").classList.remove("hidden");
+    var searchInput = document.getElementById("history-search");
+    if (searchInput) searchInput.value = "";
+    await fetchHistory();
+  };
+
+  window.closeHistory = function () {
+    $("#history-popup").classList.add("hidden");
+  };
+
+  async function fetchHistory(query) {
+    var url = "/api/history?count=50";
+    if (query) url += "&q=" + encodeURIComponent(query);
+    try {
+      var res = await fetch(url);
+      var data = await res.json();
+      historyCommands = data.commands || [];
+      renderHistoryList();
+    } catch (e) {
+      document.getElementById("history-list").innerHTML = '<div class="file-empty">불러오기 실패</div>';
+    }
+  }
+
+  window.filterHistory = function () {
+    var q = (document.getElementById("history-search") || {}).value || "";
+    fetchHistory(q);
+  };
+
+  function renderHistoryList() {
+    var container = document.getElementById("history-list");
+    if (!historyCommands.length) {
+      container.innerHTML = '<div class="file-empty">히스토리 없음</div>';
+      return;
+    }
+    var html = '';
+    historyCommands.forEach(function (cmd) {
+      html += '<button class="history-item" onclick="executeHistory(this)" data-cmd="' + escHtml(cmd).replace(/"/g, '&quot;') + '">';
+      html += escHtml(cmd);
+      html += '</button>';
+    });
+    container.innerHTML = html;
+  }
+
+  window.executeHistory = function (el) {
+    var cmd = el.getAttribute("data-cmd");
+    if (!cmd) return;
+    closeHistory();
+    sendWs(cmd + "\n");
+    showToast("실행: " + (cmd.length > 40 ? cmd.substring(0, 40) + "..." : cmd));
   };
 
   // ── Init ───────────────────────────────────────
