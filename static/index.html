@@ -434,7 +434,7 @@
       <div id="more-menu" class="hidden">
         <button onclick="openTraining(); closeMoreMenu()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/><circle cx="12" cy="12" r="1"/></svg>
-          Training Monitor
+          학습 모니터
         </button>
         <button onclick="openSnippets(); closeMoreMenu()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
@@ -519,10 +519,27 @@
         <div class="qgrid-section">
           <div class="qgrid-label">Claude Code</div>
           <div class="qgrid">
+            <button onclick="qType('claude\n')" class="q-claude">claude</button>
             <button onclick="qType('/compact\n')" class="q-claude">/compact</button>
             <button onclick="qType('/status\n')" class="q-claude">/status</button>
             <button onclick="qType('/clear\n')" class="q-claude">/clear</button>
+            <button onclick="qType('/help\n')" class="q-claude">/help</button>
+            <button onclick="qType('/commit\n')" class="q-claude">/commit</button>
+            <button onclick="qType('/review\n')" class="q-claude">/review</button>
             <button onclick="qType('\n')" class="q-claude">Enter</button>
+          </div>
+        </div>
+        <div class="qgrid-section">
+          <div class="qgrid-label">Shell</div>
+          <div class="qgrid">
+            <button onclick="qType('ls -la\n')" class="q-shell">ls -la</button>
+            <button onclick="qType('cd ..\n')" class="q-shell">cd ..</button>
+            <button onclick="qType('clear\n')" class="q-shell">clear</button>
+            <button onclick="qType('pwd\n')" class="q-shell">pwd</button>
+            <button onclick="qType('git status\n')" class="q-shell">git st</button>
+            <button onclick="qType('git log --oneline -10\n')" class="q-shell">git log</button>
+            <button onclick="qType('htop\n')" class="q-shell">htop</button>
+            <button onclick="qType('tail -f \n')" class="q-shell">tail -f</button>
           </div>
         </div>
         <div class="qgrid-section">
@@ -530,25 +547,38 @@
           <div class="qgrid">
             <button onclick="qSilent('\t')" class="q-key">TAB</button>
             <button onclick="qSilent('\x1a')" class="q-key">^Z</button>
+            <button onclick="qSilent('\x04')" class="q-key">^D</button>
             <button onclick="qSilent('\x0c')" class="q-key">^L</button>
-            <button onclick="qSilent('\x1b[A')" class="q-key">&#x2191;</button>
+            <button onclick="qSilent('\x1b[A')" class="q-key">↑</button>
+            <button onclick="qSilent('\x1b[B')" class="q-key">↓</button>
+            <button onclick="qSilent('\x15')" class="q-key">^U</button>
+            <button onclick="qSilent('\x17')" class="q-key">^W</button>
           </div>
         </div>
         <div class="qgrid-section">
           <div class="qgrid-label">tmux</div>
           <div class="qgrid">
             <button onclick="qType('tmux a\n')" class="q-tmux">접속</button>
+            <button onclick="qSilent('\x02c')" class="q-tmux">새창</button>
             <button onclick="qSilent('\x02d')" class="q-tmux">나가기</button>
             <button onclick="qSilent('\x02z')" class="q-tmux">확대</button>
+            <button onclick="qSilent('\x02o')" class="q-tmux">이동</button>
+            <button onclick="tmuxMouseOn()" class="q-tmux">터치</button>
             <button onclick="openPanePicker()" class="q-tmux">Pane</button>
+            <button onclick="qSilent('\x02n')" class="q-tmux">다음</button>
           </div>
         </div>
         <div class="qgrid-section">
           <div class="qgrid-label">System</div>
           <div class="qgrid">
             <button onclick="qType('nvidia-smi\n')" class="q-sys">gpu</button>
-            <button onclick="qType('ps aux --sort=-%cpu | head -20\n')" class="q-sys">ps</button>
+            <button onclick="qType('free -h\n')" class="q-sys">free</button>
             <button onclick="qType('df -h\n')" class="q-sys">disk</button>
+            <button onclick="qType('ps aux --sort=-%cpu | head -20\n')" class="q-sys">ps</button>
+            <button onclick="qType('ss -tlnp\n')" class="q-sys">port</button>
+            <button onclick="qType('docker ps -a\n')" class="q-sys">docker</button>
+            <button onclick="qType('uptime\n')" class="q-sys">uptime</button>
+            <button onclick="qType('who\n')" class="q-sys">who</button>
           </div>
         </div>
       </div>
