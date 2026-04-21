@@ -411,7 +411,7 @@
   window.openMonitor = function () {
     $("#monitor").classList.remove("hidden");
     fetchStats();
-    monitorTimer = setInterval(fetchStats, 3000);
+    monitorTimer = setInterval(fetchStats, 5000);
   };
 
   window.closeMonitor = function () {
@@ -874,7 +874,7 @@
     if (!extra || !btn) return;
     const isHidden = extra.classList.contains("hidden");
     extra.classList.toggle("hidden");
-    btn.textContent = isHidden ? "접기" : "더보기";
+    btn.textContent = isHidden ? "접기" : "More";
     btn.classList.toggle("open", isHidden);
     setTimeout(doFit, 100);
     setTimeout(doFit, 300);

@@ -35,8 +35,12 @@ import select
 import pwd
 import glob as glob_mod
 from pathlib import Path
-from http import HTTPStatus
-
+import shutil
+import threading
+import time
+import re
+import urllib.parse
+import urllib.request
 import websockets
 from websockets.asyncio.server import serve
 from websockets.http11 import Request, Response
@@ -74,8 +78,6 @@ else:
 ACTIVE_TOKENS = {}
 
 # Brute force protection: IP -> {attempts, locked_until}
-import time
-import re
 LOGIN_ATTEMPTS = {}  # ip -> {"count": int, "first": float, "locked_until": float}
 MAX_ATTEMPTS = 10        # 10회 실패 허용
 ATTEMPT_WINDOW = 300     # 5분 내
@@ -90,7 +92,7 @@ API_RATE_WINDOW = 60     # 1 minute window
 # ── Training Monitor: GPU history ──────────────────────────────────
 GPU_HISTORY = []  # list of {timestamp, gpus: [{util, mem_used, mem_total, temp, power}]}
 GPU_HISTORY_MAX = 100
-GPU_HISTORY_INTERVAL = 5  # seconds
+GPU_HISTORY_INTERVAL = 10  # seconds
 _gpu_history_task = None
 
 # ── Alert System ──────────────────────────────────────────────────
@@ -370,7 +372,6 @@ async def process_request(connection, request):
     if request.headers.get("Upgrade", "").lower() == "websocket":
         # WebSocket auth check via query param
         qs = request.path.split("?")[-1] if "?" in request.path else ""
-        import urllib.parse
         params = urllib.parse.parse_qs(qs)
 
         # Check share token for read-only viewer
@@ -478,7 +479,9 @@ async def process_request(connection, request):
         return handle_api(path, request, info)
 
     # Static files
-    file_path = STATIC_DIR / path.lstrip("/")
+    file_path = (STATIC_DIR / path.lstrip("/")).resolve()
+    if not str(file_path).startswith(str(STATIC_DIR.resolve())):
+        return make_response(403, b"Forbidden")
     if not file_path.exists() or not file_path.is_file():
         return make_response(404, b"404")
 
@@ -605,7 +608,6 @@ def collect_stats():
 
 
 def handle_api(path, request, session_info):
-    import urllib.parse
     qs = request.path.split("?")[-1] if "?" in request.path else ""
     params = urllib.parse.parse_qs(qs)
     user_root = session_info["home"]
@@ -777,7 +779,6 @@ def handle_api(path, request, session_info):
             # Create backup before overwrite (single .bak copy)
             backup_path = file_path + ".servit-bak"
             try:
-                import shutil
                 shutil.copy2(file_path, backup_path)
             except Exception:
                 pass  # Best effort backup
@@ -953,6 +954,8 @@ def handle_api(path, request, session_info):
         elif action == "read":
             log_path = params.get("path", [""])[0]
             lines_count = params.get("lines", ["200"])[0]
+            if not lines_count.isdigit() or int(lines_count) > 10000:
+                lines_count = "200"
             if not log_path:
                 return make_json({"error": "No path specified"})
             # Validate log path access
@@ -1005,7 +1008,6 @@ def handle_api(path, request, session_info):
         return make_json({"error": "Unknown action"})
 
     elif path.startswith("/api/notes"):
-        import urllib.parse as _up
         notes_dir = os.path.join(session_info["home"], ".servit", "notes")
         os.makedirs(notes_dir, exist_ok=True)
         action = params.get("action", ["list"])[0]
@@ -1028,7 +1030,10 @@ def handle_api(path, request, session_info):
             name = params.get("name", [""])[0]
             if not name:
                 return make_json({"error": "No name specified"})
-            fp = os.path.join(notes_dir, name + ".md")
+            safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+            if not safe_name:
+                return make_json({"error": "Invalid name"})
+            fp = os.path.join(notes_dir, safe_name + ".md")
             if not os.path.isfile(fp):
                 return make_json({"error": "Note not found"})
             try:
@@ -1058,7 +1063,10 @@ def handle_api(path, request, session_info):
             name = params.get("name", [""])[0]
             if not name:
                 return make_json({"ok": False, "error": "No name specified"})
-            fp = os.path.join(notes_dir, name + ".md")
+            safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+            if not safe_name:
+                return make_json({"ok": False, "error": "Invalid name"})
+            fp = os.path.join(notes_dir, safe_name + ".md")
             if not os.path.isfile(fp):
                 return make_json({"ok": False, "error": "Note not found"})
             try:
@@ -1125,7 +1133,10 @@ def handle_api(path, request, session_info):
             except Exception as e:
                 return make_json({"ok": False, "error": str(e)})
         elif action == "delete":
-            idx = int(params.get("index", ["-1"])[0])
+            try:
+                idx = int(params.get("index", ["-1"])[0])
+            except (ValueError, TypeError):
+                return make_json({"ok": False, "error": "Invalid index"})
             try:
                 result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
                 lines = result.stdout.split("\n")
@@ -1587,7 +1598,6 @@ def handle_api(path, request, session_info):
             tg_result = ""
             if cfg.get("telegram_bot_token") and cfg.get("telegram_chat_id"):
                 try:
-                    import urllib.request
                     url = f"https://api.telegram.org/bot{cfg['telegram_bot_token']}/sendMessage"
                     payload = json.dumps({"chat_id": cfg["telegram_chat_id"], "text": msg}).encode()
                     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
@@ -1651,7 +1661,6 @@ def handle_api(path, request, session_info):
                         "pid": proc.pid, "started": time.time()
                     }
                     # Wait in background (non-blocking for response)
-                    import threading
                     def _wait():
                         proc.wait()
                         ACTIVE_TRANSFERS[transfer_id]["status"] = "done" if proc.returncode == 0 else "error"
@@ -1667,13 +1676,10 @@ def handle_api(path, request, session_info):
                 try:
                     if action == "copy":
                         if os.path.isdir(resolved_src):
-                            import shutil
                             shutil.copytree(resolved_src, resolved_dst)
                         else:
-                            import shutil
                             shutil.copy2(resolved_src, resolved_dst)
                     else:
-                        import shutil
                         shutil.move(resolved_src, resolved_dst)
                     return make_json({"ok": True})
                 except Exception as e:
@@ -1830,7 +1836,10 @@ def handle_api(path, request, session_info):
             except Exception as e:
                 return make_json({"ok": False, "error": str(e)})
         elif action == "remove":
-            idx = int(params.get("index", ["-1"])[0])
+            try:
+                idx = int(params.get("index", ["-1"])[0])
+            except (ValueError, TypeError):
+                return make_json({"ok": False, "error": "Invalid index"})
             try:
                 bookmarks = []
                 if os.path.isfile(bm_file):
@@ -1975,7 +1984,10 @@ def handle_api(path, request, session_info):
 
     elif path.startswith("/api/history"):
         history_path = os.path.join(user_root, ".bash_history")
-        count = int(params.get("count", ["50"])[0])
+        try:
+            count = int(params.get("count", ["50"])[0])
+        except (ValueError, TypeError):
+            count = 50
         if count > 200:
             count = 200
         search_q = params.get("q", [""])[0].lower()
@@ -2200,6 +2212,7 @@ async def terminal_session(websocket):
     env["HOME"] = user_home
 
     master_fd = None
+    slave_fd = None
     proc = None
 
     try:
@@ -2213,7 +2226,7 @@ async def terminal_session(websocket):
             cwd=user_home if os.path.isdir(user_home) else "/tmp",
         )
         os.close(slave_fd)
-        slave_fd = -1  # mark as closed
+        slave_fd = None  # mark as closed
 
         # Flag to signal shutdown
         shutdown_event = asyncio.Event()
@@ -2336,7 +2349,12 @@ async def terminal_session(websocket):
                 except subprocess.TimeoutExpired:
                     pass
 
-        # Close master fd
+        # Close file descriptors
+        if slave_fd is not None:
+            try:
+                os.close(slave_fd)
+            except OSError:
+                pass
         if master_fd is not None:
             try:
                 os.close(master_fd)
@@ -2386,9 +2404,9 @@ async def collect_gpu_history():
 
 
 async def check_alerts_background():
-    """Background task: check stats against thresholds every 30 seconds."""
+    """Background task: check stats against thresholds every 60 seconds."""
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
         try:
             stats = collect_stats()
             # Load config from default home
@@ -2415,7 +2433,6 @@ async def check_alerts_background():
                 # Try Telegram
                 if cfg.get("telegram_bot_token") and cfg.get("telegram_chat_id"):
                     try:
-                        import urllib.request
                         url = f"https://api.telegram.org/bot{cfg['telegram_bot_token']}/sendMessage"
                         payload = json.dumps({"chat_id": cfg["telegram_chat_id"], "text": f"[Servit] {msg}"}).encode()
                         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
@@ -2447,7 +2464,7 @@ async def main():
     auth_desc = {
         "system": "Linux system auth (su)",
         "static": f"static accounts: {', '.join(ACCOUNTS.keys())}",
-        "single": f"single password: {FALLBACK_PASSWORD}",
+        "single": "single password mode",
     }[AUTH_MODE]
 
     print(f"""
