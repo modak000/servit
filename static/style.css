@@ -443,28 +443,107 @@ body {
   transform: scale(0.95);
 }
 
+/* ── Primary row: Y/N big, others compact ──── */
+.qrow-primary {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.q-yes-big {
+  flex: 1.5 !important;
+  background: rgba(63, 185, 80, 0.15) !important;
+  border: 2px solid var(--green) !important;
+  color: var(--green) !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  letter-spacing: 1px;
+  min-height: 52px;
+  border-radius: var(--radius) !important;
+}
+.q-yes-big:active {
+  background: var(--green) !important;
+  color: #fff !important;
+  transform: scale(0.95);
+}
+
+.q-no-big {
+  flex: 1.2 !important;
+  background: rgba(248, 81, 73, 0.12) !important;
+  border: 2px solid var(--red) !important;
+  color: var(--red) !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  letter-spacing: 1px;
+  min-height: 52px;
+  border-radius: var(--radius) !important;
+}
+.q-no-big:active {
+  background: var(--red) !important;
+  color: #fff !important;
+  transform: scale(0.95);
+}
+
 /* Button color variants */
 .q-special { color: var(--orange) !important; font-weight: 700 !important; }
 .q-danger { color: var(--red) !important; font-weight: 700 !important; }
-.q-action { color: var(--accent) !important; }
-.q-yes { color: var(--green) !important; font-weight: 700 !important; font-size: 15px !important; min-width: 40px; text-align: center; }
-.q-no { color: var(--red) !important; font-weight: 700 !important; font-size: 15px !important; min-width: 40px; text-align: center; }
+.q-action {
+  color: var(--accent) !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
 .q-tmux { color: var(--green) !important; }
 .q-claude { color: var(--cyan) !important; }
-.q-shell { color: var(--orange) !important; }
+.q-key { color: var(--orange) !important; }
 .q-sys { color: var(--yellow) !important; }
-.q-toggle {
+.q-toggle-more {
   color: var(--text2) !important;
   font-size: 12px !important;
-  margin-left: auto;
   font-family: -apple-system, sans-serif !important;
+  background: var(--bg3) !important;
+  border-color: var(--text3) !important;
 }
-.q-toggle.open { color: var(--accent) !important; }
+.q-toggle-more.open { color: var(--accent) !important; background: var(--bg2) !important; }
 
+/* ── Expanded section: organized grid ──── */
 #qbar-extra {
   border-top: 1px solid var(--bg3);
-  margin-top: 4px;
-  padding-top: 4px;
+  margin-top: 6px;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qgrid-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qgrid-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text3);
+  padding-left: 2px;
+}
+.qgrid-section:nth-child(1) .qgrid-label { color: var(--cyan); }
+.qgrid-section:nth-child(2) .qgrid-label { color: var(--orange); }
+.qgrid-section:nth-child(3) .qgrid-label { color: var(--green); }
+.qgrid-section:nth-child(4) .qgrid-label { color: var(--yellow); }
+
+.qgrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.qgrid button {
+  text-align: center;
+  justify-content: center;
 }
 
 /* ── Pane Picker ────────────────────────────────── */
